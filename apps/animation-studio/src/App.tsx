@@ -5,7 +5,7 @@ import { createSequence, createTrack, EASINGS, makeId, makeSampleHtml, prepareHt
 import { mountAnimations, type AnimationController } from "./runtime";
 import { importWebsiteZip } from "./importZip";
 
-type Tab = "Trigger" | "Animate" | "Timeline" | "Motion" | "Advanced";
+type Tab = "Design" | "Trigger" | "Animate" | "Timeline" | "Motion" | "Advanced";
 const STORAGE_KEY = "figcraft-motion-studio-v1";
 const DEMO: StudioProject = { version: 1, name: "Motion Studio Demo", html: prepareHtml(makeSampleHtml()), sequences: [] };
 
@@ -65,7 +65,7 @@ export default function App() {
   const [selectedLayer, setSelectedLayer] = useState<LayerItem | null>(null);
   const [activeSequenceId, setActiveSequenceId] = useState("");
   const [activeTrackId, setActiveTrackId] = useState("");
-  const [tab, setTab] = useState<Tab>("Trigger");
+  const [tab, setTab] = useState<Tab>("Design");
   const [breakpoint, setBreakpoint] = useState<Breakpoint>("desktop");
   const [previewMode, setPreviewMode] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -86,6 +86,7 @@ export default function App() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const designImageRef = useRef<HTMLInputElement>(null);
   const projectRef = useRef(project);
   const selectedRef = useRef(selected);
   const previewModeRef = useRef(previewMode);
@@ -570,6 +571,107 @@ load(GSAP).then(function(){return load(SCROLL);}).then(function(){return fetch("
     const html=serializeFrame(frame);
     commit(d=>{d.html=html;},`CSS ${property} updated`);
   };
+  const readSelectedText=()=>{
+    const el=iframeRef.current?.contentDocument?.querySelector(selectorFor(selected));
+    return el?.textContent??"";
+  };
+  const writeSelectedText=(value:string)=>{
+    const frame=iframeRef.current,doc=frame?.contentDocument;
+    const el=doc?.querySelector(selectorFor(selected));
+    if(!frame||!doc||!el)return;
+    el.textContent=value;
+    const html=serializeFrame(frame);
+    commit(d=>{d.html=html;},"Text content updated");
+    refreshLayers();
+  };
+  const addDesignElement=(kind:"frame"|"rectangle"|"ellipse"|"text"|"heading"|"button"|"divider")=>{
+    const doc=iframeRef.current?.contentDocument;
+    if(!doc)return;
+    const parent=kind==="frame"?doc.body:(doc.querySelector(selectorFor(selected))??doc.body);
+    const el=doc.createElement(kind==="heading"?"h2":kind==="button"?"button":kind==="divider"?"hr":kind==="text"?"p":"div");
+    const id=makeId("design");
+    const names={frame:"Frame",rectangle:"Rectangle",ellipse:"Ellipse",text:"Text",heading:"Heading",button:"Button",divider:"Divider"};
+    el.setAttribute("data-avab-id",id);
+    el.setAttribute("data-avab-name",names[kind]);
+    el.setAttribute("data-avab-created","true");
+    if(kind==="frame"){
+      el.style.cssText="display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:16px;width:100%;min-height:260px;padding:32px;background:#f1f2f4;color:#15171b;border:1px solid #d7d9de;border-radius:8px;position:relative;box-sizing:border-box;";
+      el.textContent="Frame";
+    }else if(kind==="rectangle"){
+      el.style.cssText="display:block;width:180px;height:120px;min-width:24px;min-height:24px;background:#d7f75b;border:1px solid #9ebc3e;border-radius:8px;position:relative;box-sizing:border-box;";
+    }else if(kind==="ellipse"){
+      el.style.cssText="display:block;width:120px;height:120px;min-width:24px;min-height:24px;background:#7cb7f2;border:1px solid #5289c0;border-radius:50%;position:relative;box-sizing:border-box;";
+    }else if(kind==="text"){
+      el.style.cssText="font:400 16px/1.5 Inter,Arial,sans-serif;color:#20232a;margin:0;min-width:80px;position:relative;";
+      el.textContent="Add your text here";
+    }else if(kind==="heading"){
+      el.style.cssText="font:700 36px/1.1 Inter,Arial,sans-serif;letter-spacing:-.04em;color:#17191e;margin:0;position:relative;";
+      el.textContent="Your heading";
+    }else if(kind==="button"){
+      el.style.cssText="display:inline-flex;align-items:center;justify-content:center;padding:12px 20px;background:#d7f75b;color:#15180e;border:0;border-radius:5px;font:700 13px Inter,Arial,sans-serif;cursor:pointer;position:relative;";
+      el.textContent="Button";
+    }else{
+      el.style.cssText="display:block;width:100%;border:0;border-top:1px solid #b9bec7;margin:12px 0;position:relative;";
+    }
+    parent.appendChild(el);
+    const html=serializeFrame(iframeRef.current!);
+    commit(d=>{d.html=html;},"Design element added");
+    setSelected(id);setSelectedIds([id]);setTab("Design");
+    window.setTimeout(refreshLayers,60);
+  };
+  const addDesignImage=async(file:File)=>{
+    const doc=iframeRef.current?.contentDocument;
+    if(!doc)return;
+    const data=await new Promise<string>((resolve,reject)=>{
+      const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(file);
+    });
+    const img=doc.createElement("img");
+    const id=makeId("image");
+    img.src=data;img.alt=file.name;img.setAttribute("data-avab-id",id);img.setAttribute("data-avab-name",file.name);
+    img.style.cssText="display:block;width:320px;max-width:100%;height:auto;object-fit:cover;border-radius:6px;position:relative;";
+    const parent=doc.querySelector(selectorFor(selected))??doc.body;
+    parent.appendChild(img);
+    const html=serializeFrame(iframeRef.current!);
+    commit(d=>{d.html=html;},"Image added");
+    setSelected(id);setSelectedIds([id]);setTab("Design");window.setTimeout(refreshLayers,60);
+  };
+  const deleteSelection=()=>{
+    const doc=iframeRef.current?.contentDocument;
+    if(!doc)return;
+    selectedIds.forEach(id=>doc.querySelector(selectorFor(id))?.remove());
+    const html=serializeFrame(iframeRef.current!);
+    commit(d=>{d.html=html;},"Selected element(s) deleted");
+    setSelected("");setSelectedIds([]);setSelectedLayer(null);window.setTimeout(refreshLayers,60);
+  };
+  const duplicateSelection=()=>{
+    if(selectedIds.length===1)duplicateLayer(selectedIds[0]);
+    else setStatus("Duplicate one layer at a time; multi-selection can be styled together.");
+  };
+  const alignSelection=(mode:"left"|"center"|"right"|"top"|"middle"|"bottom")=>{
+    const doc=iframeRef.current?.contentDocument;
+    if(!doc||selectedIds.length<2)return;
+    const els=selectedIds.map(id=>doc.querySelector(selectorFor(id))).filter((el):el is HTMLElement=>el instanceof HTMLElement);
+    if(els.length<2)return;
+    const rects=els.map(el=>el.getBoundingClientRect());
+    const left=Math.min(...rects.map(r=>r.left)),right=Math.max(...rects.map(r=>r.right));
+    const top=Math.min(...rects.map(r=>r.top)),bottom=Math.max(...rects.map(r=>r.bottom));
+    const centerX=(left+right)/2,centerY=(top+bottom)/2;
+    els.forEach((el,i)=>{
+      const r=rects[i];
+      if(mode==="left"||mode==="center"||mode==="right"){
+        const target=mode==="left"?left-r.left:mode==="right"?right-r.right:centerX-(r.left+r.width/2);
+        const currentX=Number.parseFloat(el.style.translate.split(" ")[0])||0;
+        el.style.translate=(currentX+target)+"px "+(el.style.translate.split(" ")[1]||"0px");
+      }else{
+        const target=mode==="top"?top-r.top:mode==="bottom"?bottom-r.bottom:centerY-(r.top+r.height/2);
+        const pieces=(el.style.translate||"none").split(" ");
+        const currentY=Number.parseFloat(pieces[1])||0;
+        el.style.translate=(pieces[0]==="none"?"0px":pieces[0])+" "+(currentY+target)+"px";
+      }
+    });
+    const html=serializeFrame(iframeRef.current!);
+    commit(d=>{d.html=html;},"Layers aligned");
+  };
   const switchBreakpoint=(bp:Breakpoint)=>{
     setBreakpoint(bp);
     const frame=iframeRef.current;
@@ -619,7 +721,21 @@ load(GSAP).then(function(){return load(SCROLL);}).then(function(){return fetch("
         </div>
       </aside>
       <section className="center-workspace">
-        <div className="canvas-toolbar"><div><b>CANVAS</b><span className="canvas-url">/ {project.name.toLowerCase().replace(/\s+/g,"-")}</span></div><div><span className="canvas-badge">{breakpoint.toUpperCase()} · LIVE DOM</span><button onClick={()=>refreshPreview()}>↻ Refresh</button><button onClick={()=>{const frame=iframeRef.current;if(frame)frame.contentWindow?.scrollTo({top:0,behavior:"smooth"});}}>↑ Top</button></div></div>
+        <div className="canvas-toolbar">
+          <div><b>DESIGN CANVAS</b><span className="canvas-url">/ {project.name.toLowerCase().replace(/\s+/g,"-")}</span></div>
+          <div className="insert-tools">
+            <button onClick={()=>addDesignElement("frame")} title="Add frame">＋ Frame</button>
+            <button onClick={()=>addDesignElement("rectangle")} title="Add rectangle">▰ Rect</button>
+            <button onClick={()=>addDesignElement("ellipse")} title="Add ellipse">◯ Ellipse</button>
+            <button onClick={()=>addDesignElement("text")} title="Add text">T Text</button>
+            <button onClick={()=>addDesignElement("heading")} title="Add heading">H Heading</button>
+            <button onClick={()=>addDesignElement("button")} title="Add button">▱ Button</button>
+            <button onClick={()=>designImageRef.current?.click()} title="Add image">▧ Image</button>
+            <button onClick={()=>addDesignElement("divider")} title="Add divider">— Line</button>
+            <input ref={designImageRef} hidden type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0];if(file)void addDesignImage(file);e.currentTarget.value="";}}/>
+          </div>
+          <div className="canvas-tools-right"><span className="canvas-badge">{breakpoint.toUpperCase()} · DOM</span><button onClick={()=>refreshPreview()}>↻</button><button onClick={deleteSelection} disabled={!selectedIds.length} title="Delete selection">⌫</button></div>
+        </div>
         <div className="canvas-area">
           <div className="browser-frame" style={{width:breakpoint==="desktop"?"100%":breakpoint==="tablet"?"768px":"390px"}}>
             <div className="browser-chrome"><div className="browser-dots"><i/><i/><i/></div><div className="address">⌁ &nbsp; preview.figcraft.local / {project.name}</div><span>↗</span></div>
@@ -651,9 +767,10 @@ load(GSAP).then(function(){return load(SCROLL);}).then(function(){return fetch("
         </section>
       </section>
       <aside className="right-panel">
-        <div className="inspector-header"><div><b>Animation Inspector</b><small>{selectedIds.length>1?`${selectedIds.length} elements selected`:selectedLayer?.name??"No element selected"}</small></div><button onClick={()=>setShowPresets(v=>!v)}>✦ Presets</button></div>
-        <nav className="inspector-tabs">{(["Trigger","Animate","Timeline","Motion","Advanced"] as Tab[]).map(t=><button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{t}</button>)}</nav>
+        <div className="inspector-header"><div><b>{tab==="Design"?"Design Inspector":"Animation Inspector"}</b><small>{selectedIds.length>1?`${selectedIds.length} elements selected`:selectedLayer?.name??"No element selected"}</small></div><button onClick={()=>setShowPresets(v=>!v)}>✦ Presets</button></div>
+        <nav className="inspector-tabs">{(["Design","Trigger","Animate","Timeline","Motion","Advanced"] as Tab[]).map(t=><button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{t}</button>)}</nav>
         <div className="inspector-content">
+          {tab==="Design"&&<DesignInspector key={selectedIds.join(",")} selectedCount={selectedIds.length} selectedText={readSelectedText()} readCss={readCss} writeCss={writeCss} writeText={writeSelectedText} deleteSelection={deleteSelection} duplicateSelection={duplicateSelection} alignSelection={alignSelection}/>}
           {tab==="Trigger"&&<TriggerInspector sequence={currentSequence} update={updateTrigger} updateName={name=>updateSequence({name})} addSequence={addSequence} duplicateSequence={duplicateSequence}/>}
           {tab==="Animate"&&<AnimateInspector addTrack={addTrack} track={currentTrack} updateTrack={updateTrack} removeTrack={removeTrack} addKeyframe={addKeyframe} savePreset={saveCurrentPreset} copyTrack={copyTrack} pasteTrack={pasteTrack} duplicateTrack={duplicateTrack} hasClipboard={Boolean(trackClipboard)} selected={selected}/>}
           {tab==="Timeline"&&<TimelineInspector sequence={currentSequence} track={currentTrack} updateKeyframe={updateKeyframe} playhead={playhead}/>}
@@ -736,5 +853,34 @@ function AdvancedInspector({sequence,updateTrigger,breakpoint,track,commit,readC
  const apply=(enabled:boolean)=>{if(!track)return;commit(d=>{const s=d.sequences.find(x=>x.id===sequence.id);const t=s?.tracks.find(x=>x.id===track.id);if(!t)return;t.overrides={...t.overrides,[breakpoint]:{enabled,keyframes:clone(t.overrides?.[breakpoint]?.keyframes??t.keyframes)}};},`${breakpoint} override changed`);};
  const current=track?.overrides?.[breakpoint];
  return <><Section title="Responsive breakpoint"><div className="breakpoint-pill">{breakpoint.toUpperCase()}</div><p className="helper">Overrides are stored per desktop, tablet and mobile. Disable this track or change its keyframe values for the active breakpoint.</p>{track&&<><Field label={`Enable on ${breakpoint}`} value={current?.enabled??true} type="checkbox" onChange={v=>apply(Boolean(v))}/>{(current?.keyframes??track.keyframes).map(k=><div className="keyframe-row" key={k.id}><b>{k.at}s</b><Field label="Value" value={k.value} onChange={v=>commit(d=>{const t=d.sequences.find(s=>s.id===sequence.id)?.tracks.find(x=>x.id===track.id);if(!t)return;const bp=t.overrides?.[breakpoint];if(bp)bp.keyframes=bp.keyframes.map(x=>x.id===k.id?{...x,value:typeof v==="boolean"?String(v):v}:x);else t.overrides={...t.overrides,[breakpoint]:{enabled:true,keyframes:t.keyframes.map(x=>x.id===k.id?{...x,value:typeof v==="boolean"?String(v):v}:x)}};})}/></div>)}</>}</Section><Section title="Advanced trigger"><Field label="Scroller selector" value={sequence.trigger.scroller} onChange={v=>updateTrigger({scroller:String(v)})}/><Field label="Horizontal" value={sequence.trigger.horizontal} type="checkbox" onChange={v=>updateTrigger({horizontal:Boolean(v)})}/><Field label="Start marker" value={sequence.trigger.markers} type="checkbox" onChange={v=>updateTrigger({markers:Boolean(v)})}/><Field label="Page scrolled threshold" value={sequence.trigger.threshold} type="number" onChange={v=>updateTrigger({threshold:Number(v)})}/></Section><Section title="CSS position & layout"><p className="helper">Position is applied to the selected real DOM element. Sticky positioning needs a scrollable ancestor and an offset.</p><Field label="Position mode" value={readCss("position")} type="select" options={["static","relative","absolute","fixed","sticky"]} onChange={v=>writeCss("position",String(v))}/>{(["top","right","bottom","left"] as const).map(side=><Field key={side} label={side[0].toUpperCase()+side.slice(1)} value={readCss(side)} onChange={v=>writeCss(side,String(v))}/>)}<Field label="Z-index" value={readCss("z-index")} onChange={v=>writeCss("z-index",String(v))}/><Field label="Overflow" value={readCss("overflow")} type="select" options={["visible","hidden","clip","auto","scroll"]} onChange={v=>writeCss("overflow",String(v))}/><Field label="Pointer events" value={readCss("pointer-events")} type="select" options={["auto","none","visible","painted"]} onChange={v=>writeCss("pointer-events",String(v))}/></Section></>;
+}
+function DesignInspector({selectedCount,selectedText,readCss,writeCss,writeText,deleteSelection,duplicateSelection,alignSelection}:{selectedCount:number;selectedText:string;readCss:(property:string)=>string;writeCss:(property:string,value:string)=>void;writeText:(value:string)=>void;deleteSelection:()=>void;duplicateSelection:()=>void;alignSelection:(mode:"left"|"center"|"right"|"top"|"middle"|"bottom")=>void}){
+ if(!selectedCount)return <div className="empty-inspector"><b>Design anything</b><p>Select an element in the canvas or create a Frame, Rectangle, Ellipse, Text, Image or Button.</p></div>;
+ const tag=readCss("display");
+ return <>
+  <Section title="Selection"><div className="design-selection"><span className="selection-count">{selectedCount}</span><span>{selectedCount===1?"element selected":"elements selected"}</span><button onClick={duplicateSelection}>⧉</button><button onClick={deleteSelection}>⌫</button></div>
+  {selectedCount===1&&<TextContentEditor value={selectedText} onSave={writeText}/>}</Section>
+  <Section title="Position & size"><CssField label="Position" value={readCss("position")} type="select" options={["static","relative","absolute","fixed","sticky"]} onSave={v=>writeCss("position",v)}/><div className="design-grid-2"><CssField label="X / Left" value={readCss("left")} onSave={v=>writeCss("left",v)}/><CssField label="Y / Top" value={readCss("top")} onSave={v=>writeCss("top",v)}/><CssField label="Width" value={readCss("width")} onSave={v=>writeCss("width",v)}/><CssField label="Height" value={readCss("height")} onSave={v=>writeCss("height",v)}/><CssField label="Min width" value={readCss("min-width")} onSave={v=>writeCss("min-width",v)}/><CssField label="Min height" value={readCss("min-height")} onSave={v=>writeCss("min-height",v)}/><CssField label="Max width" value={readCss("max-width")} onSave={v=>writeCss("max-width",v)}/><CssField label="Max height" value={readCss("max-height")} onSave={v=>writeCss("max-height",v)}/></div><CssField label="Z-index" value={readCss("z-index")} onSave={v=>writeCss("z-index",v)}/></Section>
+  <Section title="Layout"><CssField label="Display" value={readCss("display")} type="select" options={["block","inline","inline-block","flex","inline-flex","grid","none"]} onSave={v=>writeCss("display",v)}/><CssField label="Direction" value={readCss("flex-direction")} type="select" options={["row","column","row-reverse","column-reverse"]} onSave={v=>writeCss("flex-direction",v)}/><CssField label="Justify" value={readCss("justify-content")} type="select" options={["flex-start","center","flex-end","space-between","space-around","space-evenly"]} onSave={v=>writeCss("justify-content",v)}/><CssField label="Align items" value={readCss("align-items")} type="select" options={["stretch","flex-start","center","flex-end","baseline"]} onSave={v=>writeCss("align-items",v)}/><CssField label="Gap" value={readCss("gap")} onSave={v=>writeCss("gap",v)}/><CssField label="Padding" value={readCss("padding")} onSave={v=>writeCss("padding",v)}/><CssField label="Margin" value={readCss("margin")} onSave={v=>writeCss("margin",v)}/><CssField label="Overflow" value={readCss("overflow")} type="select" options={["visible","hidden","clip","auto","scroll"]} onSave={v=>writeCss("overflow",v)}/></Section>
+  <Section title="Fill & stroke"><CssField label="Fill / background" value={readCss("background-color")} type="color" onSave={v=>writeCss("background-color",v)}/><CssField label="Text color" value={readCss("color")} type="color" onSave={v=>writeCss("color",v)}/><CssField label="Border color" value={readCss("border-color")} type="color" onSave={v=>writeCss("border-color",v)}/><div className="design-grid-2"><CssField label="Border width" value={readCss("border-width")} onSave={v=>writeCss("border-width",v)}/><CssField label="Radius" value={readCss("border-radius")} onSave={v=>writeCss("border-radius",v)}/></div><CssField label="Border style" value={readCss("border-style")} type="select" options={["none","solid","dashed","dotted","double"]} onSave={v=>writeCss("border-style",v)}/><CssField label="Opacity" value={readCss("opacity")} onSave={v=>writeCss("opacity",v)}/></Section>
+  <Section title="Typography"><CssField label="Font family" value={readCss("font-family")} onSave={v=>writeCss("font-family",v)}/><div className="design-grid-2"><CssField label="Font size" value={readCss("font-size")} onSave={v=>writeCss("font-size",v)}/><CssField label="Weight" value={readCss("font-weight")} type="select" options={["100","200","300","400","500","600","700","800","900"]} onSave={v=>writeCss("font-weight",v)}/><CssField label="Line height" value={readCss("line-height")} onSave={v=>writeCss("line-height",v)}/><CssField label="Letter spacing" value={readCss("letter-spacing")} onSave={v=>writeCss("letter-spacing",v)}/></div><CssField label="Text align" value={readCss("text-align")} type="select" options={["left","center","right","justify"]} onSave={v=>writeCss("text-align",v)}/><CssField label="Text transform" value={readCss("text-transform")} type="select" options={["none","uppercase","lowercase","capitalize"]} onSave={v=>writeCss("text-transform",v)}/></Section>
+  <Section title="Effects"><CssField label="Box shadow" value={readCss("box-shadow")} onSave={v=>writeCss("box-shadow",v)}/><CssField label="Filter" value={readCss("filter")} onSave={v=>writeCss("filter",v)}/><CssField label="Transform" value={readCss("transform")} onSave={v=>writeCss("transform",v)}/><CssField label="Transform origin" value={readCss("transform-origin")} onSave={v=>writeCss("transform-origin",v)}/></Section>
+  <Section title="Alignment">{selectedCount>1?<div className="align-grid">{(["left","center","right","top","middle","bottom"] as const).map(mode=><button key={mode} onClick={()=>alignSelection(mode)}>{mode}</button>)}</div>:<p className="helper">Select multiple layers to align their edges and centers relative to the current selection bounds.</p>}</Section>
+ </>;
+}
+function CssField({label,value,onSave,type="text",options}:{label:string;value:string;onSave:(v:string)=>void;type?:"text"|"color"|"select";options?:string[]}){
+ const [draft,setDraft]=useState(value);
+ useEffect(()=>setDraft(value),[value]);
+ const colorValue=()=>{
+  const m=draft.match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if(m)return "#"+m.slice(1,4).map(n=>Number(n).toString(16).padStart(2,"0")).join("");
+  return /^#[0-9a-f]{6}$/i.test(draft)?draft:"#ffffff";
+ };
+ return <label className="field"><span>{label}</span><div className="field-control design-field-control">{type==="select"?<select value={draft} onChange={e=>{setDraft(e.target.value);onSave(e.target.value);}}>{(options??[]).map(v=><option value={v} key={v}>{v}</option>)}</select>:type==="color"?<><input type="color" value={colorValue()} onChange={e=>{setDraft(e.target.value);onSave(e.target.value);}}/><small>{draft}</small></>:<input type="text" value={draft} onChange={e=>setDraft(e.target.value)} onBlur={()=>{if(draft!==value)onSave(draft);}} onKeyDown={e=>{if(e.key==="Enter"){(e.target as HTMLInputElement).blur();}}}/>}</div></label>;
+}
+function TextContentEditor({value,onSave}:{value:string;onSave:(value:string)=>void}){
+ const [draft,setDraft]=useState(value);
+ useEffect(()=>setDraft(value),[value]);
+ return <label className="text-content-editor"><span>Text content</span><textarea value={draft} onChange={e=>setDraft(e.target.value)} onBlur={()=>{if(draft!==value)onSave(draft);}} rows={3}/><small>Edits save when you leave this field.</small></label>;
 }
 function download(blob:Blob,name:string){const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);}
