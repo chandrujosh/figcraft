@@ -1512,14 +1512,14 @@ fn scroll_animation_timeline(
         let start_resp = ui.interact(start_handle, Id::new(("scroll-step-start", node_id.0, animation_index, step_index)), egui::Sense::click_and_drag());
         if start_resp.hovered() || start_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
         if start_resp.dragged() && let Some(pointer) = start_resp.interact_pointer_pos() {
-            step.start = ((pointer.x - track.left()) / track.width()).clamp(0.0, (step.end - 0.01).max(0.0)) as f64;
+            step.start = ((pointer.x - track.left()) / track.width()).clamp(0.0, (step.end - 0.01).max(0.0) as f32) as f64;
             *selected = step_index;
         }
         let end_handle = egui::Rect::from_center_size(egui::pos2(end_x.min(track.right()), track.center().y), handle_size);
         let end_resp = ui.interact(end_handle, Id::new(("scroll-step-end", node_id.0, animation_index, step_index)), egui::Sense::click_and_drag());
         if end_resp.hovered() || end_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
         if end_resp.dragged() && let Some(pointer) = end_resp.interact_pointer_pos() {
-            step.end = ((pointer.x - track.left()) / track.width()).clamp((step.start + 0.01).min(1.0), 1.0) as f64;
+            step.end = ((pointer.x - track.left()) / track.width()).clamp((step.start + 0.01).min(1.0) as f32, 1.0) as f64;
             *selected = step_index;
         }
         ui.painter().rect_filled(start_handle.shrink(2.0), egui::CornerRadius::same(2), Color32::WHITE);
