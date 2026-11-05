@@ -60,12 +60,15 @@ export default function App() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const projectRef = useRef(project);
+  const selectedRef = useRef(selected);
+  const previewModeRef = useRef(previewMode);
   const controllerRef = useRef<AnimationController | null>(null);
   const currentSequence = project.sequences.find(s => s.id === activeSequenceId) ?? project.sequences[0];
   const currentTrack = currentSequence?.tracks.find(t => t.id === activeTrackId) ?? currentSequence?.tracks[0];
   const duration = useMemo(() => Math.max(1, ...project.sequences.flatMap(s => s.tracks.flatMap(t => t.keyframes.map(k => k.at)))), [project.sequences]);
 
   useEffect(() => { projectRef.current = project; }, [project]);
+  useEffect(() => { selectedRef.current = selected; previewModeRef.current = previewMode; }, [selected, previewMode]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
@@ -104,7 +107,7 @@ export default function App() {
     walk(root,0);
     setLayers(next);
     setSelectedLayer(next.find(l=>l.id===selected) ?? null);
-  }, [selected]);
+  }, []);
 
   const refreshPreview = useCallback(() => {
     const frame=iframeRef.current;
@@ -116,13 +119,13 @@ export default function App() {
       const d=frame.contentDocument;
       if(!d) return;
       d.querySelectorAll("[data-avab-id]").forEach(el=>el.addEventListener("click", e=>{
-        if(previewMode) return;
+        if(previewModeRef.current) return;
         e.preventDefault(); e.stopPropagation();
         const id=(el as HTMLElement).dataset.avabId;
         if(id) window.postMessage({type:"AVAB_SELECT",id},"*");
       },true));
       d.addEventListener("pointerdown",e=>{
-        if(previewMode) return;
+        if(previewModeRef.current) return;
         const target=e.target instanceof Element?e.target.closest("[data-avab-id]"):null;
         if(!target) return;
         const id=target.getAttribute("data-avab-id");
@@ -134,15 +137,14 @@ export default function App() {
       },true);
       const style=d.createElement("style");
       style.id="avab-editor-style";
-      style.textContent=`[data-avab-id]{cursor:crosshair!important;outline:1px dashed rgba(151,203,255,.0);outline-offset:2px;transition:outline-color .12s}[data-avab-id]:hover{outline-color:rgba(151,203,255,.65)!important} [data-avab-id=" ${selected}"]{outline:2px solid #d7f75b!important} body.avab-preview [data-avab-id]{cursor:auto!important;outline:none!important}`;
+      style.textContent=`[data-avab-id]{cursor:${previewModeRef.current?"auto":"crosshair"}!important;outline:1px dashed transparent;outline-offset:2px}[data-avab-id]:hover{outline-color:${previewModeRef.current?"transparent":"rgba(151,203,255,.65)"}!important}[data-avab-selected="true"]{outline:2px solid #d7f75b!important}`;
       d.head.appendChild(style);
-      const el=d.querySelector(selectorFor(selected));
+      const el=d.querySelector(selectorFor(selectedRef.current));
       el?.setAttribute("data-avab-selected","true");
       refreshLayers();
     };
-    if(doc.readyState==="complete"||doc.readyState==="interactive") inject();
-    else frame.onload=inject;
-  },[previewMode,selected,refreshLayers]);
+    win?.setTimeout(inject, 0);
+  }, []);
 
   useEffect(()=>{ refreshPreview(); },[project.html,refreshPreview]);
 
@@ -206,6 +208,7 @@ export default function App() {
   };
   const addSequence=(type:TriggerType="scrollIntoView")=>{
     const s=createSequence(`Animation ${project.sequences.length+1}`,type);
+    s.trigger.target=selectorFor(selected);
     commit(d=>d.sequences.push(s),"New animation created");
     setActiveSequenceId(s.id);setActiveTrackId("");setTab("Trigger");
   };
@@ -399,7 +402,7 @@ export default function App() {
             <span className="timecode">{playhead.toFixed(2)}s / {duration.toFixed(2)}s</span>
             <button onClick={()=>setZoom(z=>Math.min(2.5,z*1.2))}>＋</button><button onClick={()=>setZoom(z=>Math.max(.4,z/1.2))}>－</button>
           </div></div>
-          <div className="timeline-scroll"><div className="timeline-ruler" style={{width:`${Math.max(100,duration*120*zoom)}%`}}>
+          <div className="timeline-scroll"><div className="timeline-ruler" style={{width:`${Math.max(600,duration*120*zoom)}px`}}>
             {Array.from({length:Math.ceil(duration*2)+1},(_,i)=><span key={i} style={{left:`${i*0.5/duration*100}%`}}>{i%2===0?`${(i/2).toFixed(1)}s`:"·"}</span>)}
           </div>
           <div className="timeline-track-list" style={{width:`${Math.max(100,duration*120*zoom)}%`}}>
@@ -409,7 +412,8 @@ export default function App() {
             </div>)}
             {currentSequence?.tracks.length===0&&<div className="empty-timeline">Add a property action to create your first animation track.</div>}
           </div>
-          <input className="playhead-slider" type="range" min="0" max={duration} step=".01" value={playhead} onChange={e=>scrub(Number(e.target.value))} style={{"--playhead":`${playhead/duration*100}%`} as React.CSSProperties}/></div>
+          <div className="timeline-playhead" style={{left:`${playhead/duration*100}%`}}/>
+          <input className="playhead-slider" type="range" min="0" max={duration} step=".01" value={playhead} onChange={e=>scrub(Number(e.target.value))}/></div>
           <div className="timeline-bottom"><span>{currentSequence?.tracks.length??0} ACTION TRACKS</span><span>DOUBLE-CLICK A DIAMOND TO REMOVE A KEYFRAME · DRAG TIMING IN THE INSPECTOR</span></div>
         </section>
       </section>
