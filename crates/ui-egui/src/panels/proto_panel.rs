@@ -335,7 +335,7 @@ pub fn prototype(app: &mut FigApp, ui: &mut Ui) {
     widgets::separator(ui);
     scroll_section(app, ui, &doc, &sel, &node);
     widgets::separator(ui);
-    scroll_animations(app, ui, &sel, &node);
+    scroll_animations(app, ui, &doc, &sel, &node);
 }
 
 /// Several layers with different interactions: "+" replaces them all with one click interaction
@@ -1303,10 +1303,8 @@ pub fn curve(p: &egui::Painter, r: Rect, e: Easing, col: Color32, dot: Option<f6
     }
 }
 
-fn scroll_animations(app: &mut FigApp, ui: &mut Ui, sel: &[NodeId], node: &Node) {
-    let mixed = sel
-        .iter()
-        .any(|id| app.session.doc().ok().and_then(|d| d.node(*id).map(|n| n.scroll_animations.clone())) != Some(node.scroll_animations.clone()));
+fn scroll_animations(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], node: &Node) {
+    let mixed = sel.iter().any(|id| doc.node(*id).map(|n| n.scroll_animations.clone()) != Some(node.scroll_animations.clone()));
     ui.horizontal(|ui| {
         widgets::label(ui, tr("Scroll animations"), Tokens::get(ui.ctx()).text);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1337,28 +1335,16 @@ fn scroll_animations(app: &mut FigApp, ui: &mut Ui, sel: &[NodeId], node: &Node)
     for index in 0..animations.len() {
         let Some(animation) = animations.get_mut(index) else { continue };
         let before = animation.clone();
-        let (remove_step, duplicate, remove) = scroll_animation_card(ui, node.id, index, animation);
+        let (remove_step, duplicate, remove) = scroll_animation_card(ui, doc, node.id, index, animation);
         if let Some(step_index) = remove_step {
-            if step_index < animation.steps.len() {
-                animation.steps.remove(step_index);
-                changed = true;
-            }
+            if step_index < animation.steps.len() { animation.steps.remove(step_index); changed = true; }
         }
-        if duplicate {
-            duplicate_index = Some(index);
-        }
-        if remove {
-            remove_index = Some(index);
-        }
-        if *animation != before {
-            changed = true;
-        }
+        if duplicate { duplicate_index = Some(index); }
+        if remove { remove_index = Some(index); }
+        if *animation != before { changed = true; }
     }
     if let Some(index) = remove_index {
-        if index < animations.len() {
-            animations.remove(index);
-            changed = true;
-        }
+        if index < animations.len() { animations.remove(index); changed = true; }
     }
     if let Some(index) = duplicate_index {
         if animations.len() < figcraft_doc::proto::MAX_SCROLL_ANIMATIONS {
@@ -1369,46 +1355,34 @@ fn scroll_animations(app: &mut FigApp, ui: &mut Ui, sel: &[NodeId], node: &Node)
             }
         }
     }
-    if changed {
-        save_scroll_animations(app, sel, &animations);
-    }
+    if changed { save_scroll_animations(app, sel, &animations); }
 }
 
-fn scroll_animation_card(ui: &mut Ui, node_id: NodeId, index: usize, animation: &mut ScrollAnimation) -> (Option<usize>, bool, bool) {
+fn scroll_animation_card(ui: &mut Ui, doc: &Document, node_id: NodeId, index: usize, animation: &mut ScrollAnimation) -> (Option<usize>, bool, bool) {
     let mut remove_step = None;
     let mut duplicate = false;
     let mut remove = false;
     let title = format!("{}##scroll-animation-{index}", animation.name);
     egui::CollapsingHeader::new(title).id_salt(("scroll-animation", node_id.0, index)).default_open(index == 0).show(ui, |ui| {
-        // Keep the editor constrained to the inspector column. In particular, never ask a
-        // TextEdit or a slider row for an unbounded width: the inspector is a narrow, vertically
-        // scrolling panel and its contents must not create horizontal overflow.
-        let content_width = ui.available_width();
-        ui.set_width(content_width);
+        ui.set_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
             ui.checkbox(&mut animation.enabled, tr("Enabled"));
             ui.checkbox(&mut animation.reverse, tr("Reverse"));
         });
-        ui.add_sized(
-            egui::vec2(ui.available_width(), FIELD_H),
-            egui::TextEdit::singleline(&mut animation.name).hint_text(tr("Animation name")),
-        );
+        ui.add_sized(egui::vec2(ui.available_width(), FIELD_H), egui::TextEdit::singleline(&mut animation.name).hint_text(tr("Animation name")));
         scroll_animation_controls(ui, node_id, index, animation);
         ui.separator();
-        remove_step = scroll_animation_steps(ui, node_id, index, animation);
+        remove_step = scroll_animation_steps(ui, doc, node_id, index, animation);
         ui.horizontal_wrapped(|ui| {
-            if ui.small_button(tr("Duplicate")).clicked() {
-                duplicate = true;
-            }
-            if ui.small_button(tr("Remove animation")).clicked() {
-                remove = true;
-            }
+            if ui.small_button(tr("Duplicate")).clicked() { duplicate = true; }
+            if ui.small_button(tr("Remove animation")).clicked() { remove = true; }
         });
     });
     (remove_step, duplicate, remove)
 }
 
 fn scroll_animation_controls(ui: &mut Ui, node_id: NodeId, index: usize, animation: &mut ScrollAnimation) {
+    ui.label(tr("On scroll"));
     egui::ComboBox::from_id_salt(("scroll-trigger", node_id.0, index))
         .width(ui.available_width())
         .selected_text(animation.trigger.label())
@@ -1417,8 +1391,8 @@ fn scroll_animation_controls(ui: &mut Ui, node_id: NodeId, index: usize, animati
                 ui.selectable_value(&mut animation.trigger, trigger, trigger.label());
             }
         });
-    // Put each slider on its own row. A paired "Start / End" row used to exceed the inspector's
-    // minimum width at common Windows scaling factors, clipping the left side of the property UI.
+    ui.add_space(4.0);
+    ui.strong(tr("Animation boundaries"));
     ui.horizontal(|ui| {
         ui.label(tr("Start"));
         let width = ui.available_width().max(40.0);
@@ -1439,54 +1413,146 @@ fn scroll_animation_controls(ui: &mut Ui, node_id: NodeId, index: usize, animati
         let width = ui.available_width().max(40.0);
         ui.add_sized(egui::vec2(width, FIELD_H), egui::DragValue::new(&mut animation.delay_ms).range(0..=600_000).suffix(" ms"));
     });
-    ui.label(
-        egui::RichText::new(tr("Scroll scrubbing follows scroll position; duration and delay are stored for future time-based triggers."))
-            .small()
-            .color(Tokens::get(ui.ctx()).text_secondary),
-    );
+    ui.label(egui::RichText::new(tr("Scroll scrubbing follows scroll position. Duration and delay are retained for time-based playback and export runtimes.")).small().color(Tokens::get(ui.ctx()).text_secondary));
 }
 
-fn scroll_animation_steps(ui: &mut Ui, node_id: NodeId, animation_index: usize, animation: &mut ScrollAnimation) -> Option<usize> {
+fn scroll_animation_steps(ui: &mut Ui, doc: &Document, node_id: NodeId, animation_index: usize, animation: &mut ScrollAnimation) -> Option<usize> {
+    let selected_id = Id::new(("scroll-selected-step", node_id.0, animation_index));
+    let mut selected = ui.ctx().data(|d| d.get_temp::<usize>(selected_id)).unwrap_or(0);
+    let mut add_property = None;
     ui.horizontal(|ui| {
-        ui.strong(tr("Timeline steps"));
-        if ui.small_button("+").on_hover_text(tr("Add animation step")).clicked() && animation.steps.len() < figcraft_doc::proto::MAX_SCROLL_STEPS {
-            animation.steps.push(AnimationStep::default());
-        }
+        ui.strong(tr("Scroll actions"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.menu_button("+", |ui| {
+                ui.set_min_width(170.0);
+                ui.label(tr("Transform"));
+                for property in AnimationProperty::TRANSFORM {
+                    if ui.button(property.label()).clicked() { add_property = Some(property); ui.close(); }
+                }
+                ui.separator();
+                ui.label(tr("Style"));
+                for property in AnimationProperty::STYLE {
+                    if ui.button(property.label()).clicked() { add_property = Some(property); ui.close(); }
+                }
+                ui.separator();
+                ui.label(tr("Size"));
+                for property in AnimationProperty::SIZE {
+                    if ui.button(property.label()).clicked() { add_property = Some(property); ui.close(); }
+                }
+            });
+        });
     });
-    let mut remove_step = None;
-    for (step_index, step) in animation.steps.iter_mut().enumerate() {
-        if scroll_animation_step(ui, node_id, animation_index, step_index, step) {
-            remove_step = Some(step_index);
-        }
+    if let Some(property) = add_property
+        && animation.steps.len() < figcraft_doc::proto::MAX_SCROLL_STEPS
+    {
+        let (from, to) = match property {
+            AnimationProperty::Opacity => (0.0, 1.0),
+            AnimationProperty::Scale => (0.8, 1.0),
+            AnimationProperty::Blur => (12.0, 0.0),
+            AnimationProperty::Width | AnimationProperty::Height => (0.0, 100.0),
+            _ => (0.0, 100.0),
+        };
+        animation.steps.push(AnimationStep { property, target: None, from, to, start: 0.0, end: 1.0, easing: Easing::EaseOut });
+        selected = animation.steps.len().saturating_sub(1);
     }
-    scroll_animation_timeline(ui, &animation.steps);
+
+    ui.label(egui::RichText::new(tr("Drag the track handles to change timing. Select a track to edit its target, values and easing.")).small().color(Tokens::get(ui.ctx()).text_secondary));
+    scroll_animation_timeline(ui, doc, node_id, animation_index, &mut animation.steps, &mut selected);
+    let mut remove_step = None;
+    if let Some(step) = animation.steps.get_mut(selected) {
+        ui.separator();
+        if scroll_animation_step(ui, doc, node_id, animation_index, selected, step) { remove_step = Some(selected); }
+    } else {
+        ui.label(egui::RichText::new(tr("Add an action to start building the scroll timeline.")).small().color(Tokens::get(ui.ctx()).text_secondary));
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(selected_id, selected));
     remove_step
 }
 
-fn scroll_animation_step(ui: &mut Ui, node_id: NodeId, animation_index: usize, step_index: usize, step: &mut AnimationStep) -> bool {
+fn scroll_animation_timeline(
+    ui: &mut Ui,
+    doc: &Document,
+    node_id: NodeId,
+    animation_index: usize,
+    steps: &mut [AnimationStep],
+    selected: &mut usize,
+) {
+    let colors = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let (ruler, _) = ui.allocate_exact_size(egui::vec2(width, 18.0), egui::Sense::hover());
+    for (pct, align) in [(0.0, Align2::LEFT_CENTER), (0.25, Align2::CENTER_CENTER), (0.5, Align2::CENTER_CENTER), (0.75, Align2::CENTER_CENTER), (1.0, Align2::RIGHT_CENTER)] {
+        let x = egui::lerp(ruler.x_range(), pct);
+        ui.painter().text(egui::pos2(x, ruler.center().y), align, format!("{}%", (pct * 100.0) as u32), regular(9.0), colors.text_secondary);
+    }
+    for (step_index, step) in steps.iter_mut().enumerate() {
+        let (row_rect, row_response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::click());
+        if row_response.clicked() { *selected = step_index; }
+        let active = *selected == step_index;
+        if active {
+            ui.painter().rect_filled(row_rect, egui::CornerRadius::same(5), colors.selected_row);
+        } else if row_response.hovered() {
+            ui.painter().rect_filled(row_rect, egui::CornerRadius::same(5), colors.hover);
+        }
+        let label_rect = egui::Rect::from_min_max(row_rect.min + egui::vec2(6.0, 0.0), egui::pos2(row_rect.min.x + 72.0, row_rect.max.y));
+        let label = widgets::elide(ui, step.property.label(), label_rect.width());
+        ui.painter().with_clip_rect(label_rect).text(label_rect.left_center(), Align2::LEFT_CENTER, label, regular(10.0), colors.text);
+        let target_name = step.target.and_then(|id| doc.node(id)).map(|n| n.name.as_str()).unwrap_or("Trigger");
+        let target_rect = egui::Rect::from_min_max(egui::pos2(row_rect.min.x + 72.0, row_rect.min.y + 18.0), egui::pos2(row_rect.max.x - 4.0, row_rect.max.y));
+        ui.painter().with_clip_rect(target_rect).text(target_rect.left_center(), Align2::LEFT_CENTER, target_name, regular(8.5), colors.text_secondary);
+
+        let track = egui::Rect::from_min_max(egui::pos2(row_rect.min.x + 74.0, row_rect.min.y + 5.0), egui::pos2(row_rect.max.x - 7.0, row_rect.min.y + 14.0));
+        ui.painter().rect_filled(track, egui::CornerRadius::same(3), colors.field);
+        let start_x = egui::lerp(track.x_range(), step.start.clamp(0.0, 1.0) as f32);
+        let end_x = egui::lerp(track.x_range(), step.end.clamp(0.0, 1.0) as f32).max(start_x + 3.0);
+        let bar = egui::Rect::from_min_max(egui::pos2(start_x, track.min.y), egui::pos2(end_x.min(track.max.x), track.max.y));
+        ui.painter().rect_filled(bar, egui::CornerRadius::same(3), if active { colors.accent } else { colors.selected_row });
+
+        let handle_size = egui::vec2(9.0, 18.0);
+        let start_handle = egui::Rect::from_center_size(egui::pos2(start_x, track.center().y), handle_size);
+        let start_resp = ui.interact(start_handle, Id::new(("scroll-step-start", node_id.0, animation_index, step_index)), egui::Sense::click_and_drag());
+        if start_resp.hovered() || start_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
+        if start_resp.dragged() && let Some(pointer) = start_resp.interact_pointer_pos() {
+            step.start = ((pointer.x - track.left()) / track.width()).clamp(0.0, (step.end - 0.01).max(0.0)) as f64;
+            *selected = step_index;
+        }
+        let end_handle = egui::Rect::from_center_size(egui::pos2(end_x.min(track.right()), track.center().y), handle_size);
+        let end_resp = ui.interact(end_handle, Id::new(("scroll-step-end", node_id.0, animation_index, step_index)), egui::Sense::click_and_drag());
+        if end_resp.hovered() || end_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
+        if end_resp.dragged() && let Some(pointer) = end_resp.interact_pointer_pos() {
+            step.end = ((pointer.x - track.left()) / track.width()).clamp((step.start + 0.01).min(1.0), 1.0) as f64;
+            *selected = step_index;
+        }
+        ui.painter().rect_filled(start_handle.shrink(2.0), egui::CornerRadius::same(2), Color32::WHITE);
+        ui.painter().rect_filled(end_handle.shrink(2.0), egui::CornerRadius::same(2), Color32::WHITE);
+    }
+}
+
+fn scroll_animation_step(ui: &mut Ui, doc: &Document, node_id: NodeId, animation_index: usize, step_index: usize, step: &mut AnimationStep) -> bool {
     let mut remove = false;
     ui.group(|ui| {
-        // Explicitly constrain each editor row to the inspector column. Separate value and
-        // progress controls avoid the old four-control horizontal row overflowing at 240–280 pt.
         ui.horizontal_wrapped(|ui| {
-            ui.label(format!("{} {}", tr("Step"), step_index + 1));
-            let combo_width = ui.available_width().min(150.0).max(72.0);
-            egui::ComboBox::from_id_salt(("scroll-step-property", node_id.0, animation_index, step_index))
-                .width(combo_width)
-                .selected_text(step.property.label())
-                .show_ui(ui, |ui| {
-                    for property in AnimationProperty::ALL {
-                        ui.selectable_value(&mut step.property, property, property.label());
-                    }
-                });
-            if ui.small_button("×").on_hover_text(tr("Remove step")).clicked() {
-                remove = true;
-            }
+            ui.strong(format!("{} · {}", tr("Action"), step.property.label()));
+            if ui.small_button("×").on_hover_text(tr("Remove action")).clicked() { remove = true; }
         });
+        let page = doc.page_of(node_id).unwrap_or(node_id);
+        let target_label = step.target.and_then(|id| doc.node(id)).map(|n| n.name.clone()).unwrap_or_else(|| tr("Trigger element").into());
+        ui.label(tr("Action target"));
+        egui::ComboBox::from_id_salt(("scroll-action-target", node_id.0, animation_index, step_index))
+            .width(ui.available_width())
+            .selected_text(target_label)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut step.target, None, tr("Trigger element"));
+                for id in doc.subtree(page).into_iter().filter(|id| *id != page) {
+                    let Some(candidate) = doc.node(id) else { continue };
+                    ui.selectable_value(&mut step.target, Some(id), candidate.name.clone());
+                }
+            });
+
         let (min_value, max_value) = match step.property {
             AnimationProperty::Opacity => (0.0, 1.0),
             AnimationProperty::Scale => (0.0, 100.0),
             AnimationProperty::Blur => (0.0, figcraft_doc::MAX_BLUR_RADIUS),
+            AnimationProperty::Width | AnimationProperty::Height => (0.0, 100_000.0),
             AnimationProperty::TranslateX | AnimationProperty::TranslateY | AnimationProperty::Rotate | AnimationProperty::ParallaxY => (-10_000.0, 10_000.0),
         };
         ui.horizontal(|ui| {
@@ -1500,39 +1566,30 @@ fn scroll_animation_step(ui: &mut Ui, node_id: NodeId, animation_index: usize, s
             ui.add_sized(egui::vec2(width, FIELD_H), egui::DragValue::new(&mut step.to).range(min_value..=max_value).speed(0.1));
         });
         ui.horizontal(|ui| {
-            ui.label(tr("In"));
+            ui.label(tr("Start"));
+            let mut pct = step.start * 100.0;
             let width = ui.available_width().max(40.0);
-            ui.add_sized(egui::vec2(width, FIELD_H), egui::Slider::new(&mut step.start, 0.0..=0.999));
+            if ui.add_sized(egui::vec2(width, FIELD_H), egui::Slider::new(&mut pct, 0.0..=99.9).suffix("%")).changed() {
+                step.start = (pct / 100.0).min(step.end - 0.001).max(0.0);
+            }
         });
         ui.horizontal(|ui| {
-            ui.label(tr("Out"));
+            ui.label(tr("End"));
+            let mut pct = step.end * 100.0;
             let width = ui.available_width().max(40.0);
-            ui.add_sized(egui::vec2(width, FIELD_H), egui::Slider::new(&mut step.end, (step.start + 0.001)..=1.0));
+            if ui.add_sized(egui::vec2(width, FIELD_H), egui::Slider::new(&mut pct, (step.start * 100.0 + 0.1)..=100.0).suffix("%")).changed() {
+                step.end = (pct / 100.0).max(step.start + 0.001).min(1.0);
+            }
         });
+        ui.label(tr("Easing"));
         egui::ComboBox::from_id_salt(("scroll-step-easing", node_id.0, animation_index, step_index))
             .width(ui.available_width())
             .selected_text(step.easing.label())
             .show_ui(ui, |ui| {
-                for easing in Easing::ALL {
-                    ui.selectable_value(&mut step.easing, easing, easing.label());
-                }
+                for easing in Easing::ALL { ui.selectable_value(&mut step.easing, easing, easing.label()); }
             });
     });
     remove
-}
-
-fn scroll_animation_timeline(ui: &mut Ui, steps: &[AnimationStep]) {
-    // Timeline overview: each bar shows the step's normalised start and end positions.
-    let (timeline, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), egui::Sense::hover());
-    let colors = Tokens::get(ui.ctx());
-    ui.painter().rect_filled(timeline, egui::CornerRadius::same(3), colors.field);
-    for (step_index, step) in steps.iter().enumerate() {
-        let left = egui::lerp(timeline.x_range(), step.start.clamp(0.0, 1.0) as f32);
-        let right = egui::lerp(timeline.x_range(), step.end.clamp(0.0, 1.0) as f32).max(left + 2.0);
-        let track = egui::Rect::from_min_max(egui::pos2(left, timeline.min.y + 2.0), egui::pos2(right.min(timeline.max.x), timeline.max.y - 2.0));
-        let color = if step_index % 2 == 0 { colors.accent } else { colors.selected_row };
-        ui.painter().rect_filled(track, egui::CornerRadius::same(2), color);
-    }
 }
 
 fn save_scroll_animations(app: &mut FigApp, sel: &[NodeId], animations: &[ScrollAnimation]) {
@@ -1543,30 +1600,45 @@ fn save_scroll_animations(app: &mut FigApp, sel: &[NodeId], animations: &[Scroll
 
 fn scroll_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId], node: &Node) {
     let t = Tokens::get(ui.ctx());
-    let in_frame = node.parent.and_then(|p| doc.node(p)).is_some_and(|p| p.kind.is_frame_like());
+    let parent = node.parent.and_then(|p| doc.node(p));
+    let in_frame = parent.is_some_and(|p| p.kind.is_frame_like());
+    let in_auto_layout = parent.is_some_and(|p| p.layout.is_some());
     let is_frame = node.kind.is_frame_like();
-    if !in_frame && !is_frame {
-        return;
-    }
+    if !in_frame && !in_auto_layout && !is_frame { return; }
     widgets::section_header(ui, tr("Scroll behavior"), &[], false);
-    if in_frame {
+    if in_frame || in_auto_layout {
         row(ui, 32.0, |ui| {
             widgets::label(ui, tr("Position"), t.text_secondary);
-            let cur = match node.scroll_position {
-                ScrollPosition::Scrolls => tr("Scroll with parent"),
-                ScrollPosition::Fixed => tr("Fixed"),
-                ScrollPosition::Sticky => tr("Sticky"),
+            let cur = if node.child_layout.absolute {
+                tr("Absolute")
+            } else {
+                match node.scroll_position {
+                    ScrollPosition::Scrolls => tr("Relative"),
+                    ScrollPosition::Fixed => tr("Fixed"),
+                    ScrollPosition::Sticky => tr("Sticky"),
+                }
             };
             let resp = widgets::dropdown(ui, cur, ui.available_width(), None);
             menu_popup(&resp).show(|ui| {
-                for (l, v) in [(tr("Scroll with parent"), "scrolls"), (tr("Fixed"), "fixed"), (tr("Sticky"), "sticky")] {
-                    if menu_item(ui, l, "") {
-                        app.set_props(sel, json!({"scrollPosition": v}));
+                for (label, mode, absolute) in [
+                    (tr("Relative / in flow"), "scrolls", false),
+                    (tr("Absolute / ignore auto layout"), "scrolls", true),
+                    (tr("Fixed in scroll frame"), "fixed", true),
+                    (tr("Sticky in scroll frame"), "sticky", false),
+                ] {
+                    if menu_item(ui, label, "") {
+                        app.set_props(sel, json!({"absolute": absolute, "scrollPosition": mode}));
                         ui.close();
                     }
                 }
             });
         });
+        if !in_auto_layout {
+            widgets::note(ui, tr("Absolute removes a layer from its parent's auto layout flow. Add auto layout to the parent for this setting to change its placement."), t.text_secondary);
+        }
+        if node.scroll_position == ScrollPosition::Sticky {
+            widgets::note(ui, tr("Sticky layers stay at the top edge of their scrolling parent until the parent ends."), t.text_secondary);
+        }
     }
     if is_frame {
         row(ui, 32.0, |ui| {
@@ -1579,11 +1651,14 @@ fn scroll_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId],
             };
             let resp = widgets::dropdown(ui, cur, ui.available_width(), None);
             menu_popup(&resp).show(|ui| {
-                for (l, v) in
-                    [(tr("No scrolling"), "none"), (tr("Horizontal"), "horizontal"), (tr("Vertical"), "vertical"), (tr("Both directions"), "both")]
-                {
-                    if menu_item(ui, l, "") {
-                        app.set_props(sel, json!({"overflow": v}));
+                for (label, value) in [
+                    (tr("No scrolling"), "none"),
+                    (tr("Horizontal"), "horizontal"),
+                    (tr("Vertical"), "vertical"),
+                    (tr("Both directions"), "both"),
+                ] {
+                    if menu_item(ui, label, "") {
+                        app.set_props(sel, json!({"overflow": value}));
                         ui.close();
                     }
                 }

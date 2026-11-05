@@ -27,7 +27,7 @@ the document and synchronized through the existing collaboration property mechan
   the viewport top.
 - **Scroll out of view**: scrub as the layer leaves through the viewport's top edge.
 
-The timeline properties are opacity, X/Y translation, scale, rotation, blur and vertical parallax.
+The visual scroll-action timeline supports opacity, X/Y movement, scale, rotation, blur, vertical parallax, width and height. Each track has a selectable action target (the trigger layer or another layer on the same page), draggable start/end handles, From/To values and an easing preset. In Prototype > Scroll behavior, layers can be set to Relative/in-flow, Absolute/ignore auto layout, Fixed in a scroll frame, or Sticky in a scroll frame.
 Each step has its own normalized start/end interval and easing curve. The supported easing presets
 are the same easing values already used by FigCraft's prototype transition system.
 

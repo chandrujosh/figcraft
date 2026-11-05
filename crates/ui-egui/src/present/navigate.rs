@@ -138,10 +138,9 @@ impl Presenter {
             .max(1.0);
             let relative_top = node_bounds.y0 - frame_bounds.y0 - scroll.1;
             let visible_height = (node_bounds.y1 - node_bounds.y0).max(1.0);
-            let Some(target) = displayed.node_mut(id) else { continue };
             for animation in source.scroll_animations.iter().filter(|a| a.enabled) {
                 let progress = scroll_animation_progress(animation, range, scroll, viewport_height, relative_top, visible_height);
-                apply_scroll_animation(target, animation, progress);
+                apply_scroll_animation(displayed, id, animation, progress);
             }
         }
     }
@@ -300,12 +299,37 @@ fn scroll_animation_progress(
     if animation.reverse { 1.0 - progress } else { progress }
 }
 
-fn apply_scroll_animation(target: &mut figcraft_doc::Node, animation: &figcraft_doc::proto::ScrollAnimation, progress: f64) {
-    let (mut opacity, mut translate_x, mut translate_y, mut scale, mut rotate, mut blur) = (None, 0.0, 0.0, 1.0, 0.0, None);
+fn apply_scroll_animation(
+    displayed: &mut Document,
+    trigger_id: NodeId,
+    animation: &figcraft_doc::proto::ScrollAnimation,
+    progress: f64,
+) {
+    // Every action can target the trigger layer or another layer on the same page.
+    let mut target_ids = Vec::new();
     for step in &animation.steps {
-        if progress < step.start {
-            continue;
+        let target_id = step.target.unwrap_or(trigger_id);
+        if !target_ids.contains(&target_id) { target_ids.push(target_id); }
+    }
+    for target_id in target_ids {
+        let steps: Vec<&figcraft_doc::proto::AnimationStep> = animation.steps.iter()
+            .filter(|step| step.target.unwrap_or(trigger_id) == target_id)
+            .collect();
+        if let Some(target) = displayed.node_mut(target_id) {
+            apply_scroll_animation_steps(target, &steps, progress);
         }
+    }
+}
+
+fn apply_scroll_animation_steps(
+    target: &mut figcraft_doc::Node,
+    steps: &[&figcraft_doc::proto::AnimationStep],
+    progress: f64,
+) {
+    let (mut opacity, mut translate_x, mut translate_y, mut scale, mut rotate, mut blur, mut width, mut height) =
+        (None, 0.0, 0.0, 1.0, 0.0, None, None, None);
+    for step in steps {
+        if progress < step.start { continue; }
         let length = (step.end - step.start).max(0.001);
         let local = ((progress - step.start) / length).clamp(0.0, 1.0);
         let eased = step.easing.eval(local);
@@ -317,15 +341,15 @@ fn apply_scroll_animation(target: &mut figcraft_doc::Node, animation: &figcraft_
             AnimationProperty::Scale => scale = value.clamp(0.0, 100.0),
             AnimationProperty::Rotate => rotate += value,
             AnimationProperty::Blur => blur = Some(value.clamp(0.0, figcraft_doc::MAX_BLUR_RADIUS)),
+            AnimationProperty::Width => width = Some(value.clamp(0.0, 100_000.0)),
+            AnimationProperty::Height => height = Some(value.clamp(0.0, 100_000.0)),
         }
     }
-    if let Some(value) = opacity {
-        target.opacity = value;
-    }
+    if let Some(value) = opacity { target.opacity = value; }
+    if let Some(value) = width { target.width = value; }
+    if let Some(value) = height { target.height = value; }
     apply_scroll_transform(target, translate_x, translate_y, scale, rotate);
-    if let Some(radius) = blur {
-        apply_scroll_blur(target, radius);
-    }
+    if let Some(radius) = blur { apply_scroll_blur(target, radius); }
 }
 
 fn apply_scroll_transform(target: &mut figcraft_doc::Node, translate_x: f64, translate_y: f64, scale: f64, rotate: f64) {

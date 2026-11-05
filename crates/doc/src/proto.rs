@@ -851,7 +851,7 @@ impl ScrollAnimationTrigger {
     }
 }
 
-/// A transform or visual property animated by a scroll timeline.
+/// A transform, style or size property animated by a scroll timeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum AnimationProperty {
@@ -864,18 +864,18 @@ pub enum AnimationProperty {
     Blur,
     /// Scroll-relative vertical offset for depth/parallax effects.
     ParallaxY,
+    Width,
+    Height,
 }
 
 impl AnimationProperty {
-    pub const ALL: [Self; 7] = [
-        Self::Opacity,
-        Self::TranslateX,
-        Self::TranslateY,
-        Self::Scale,
-        Self::Rotate,
-        Self::Blur,
-        Self::ParallaxY,
+    pub const ALL: [Self; 9] = [
+        Self::Opacity, Self::TranslateX, Self::TranslateY, Self::Scale, Self::Rotate,
+        Self::Blur, Self::ParallaxY, Self::Width, Self::Height,
     ];
+    pub const TRANSFORM: [Self; 5] = [Self::TranslateX, Self::TranslateY, Self::Scale, Self::Rotate, Self::ParallaxY];
+    pub const STYLE: [Self; 2] = [Self::Opacity, Self::Blur];
+    pub const SIZE: [Self; 2] = [Self::Width, Self::Height];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -886,15 +886,20 @@ impl AnimationProperty {
             Self::Rotate => "Rotate",
             Self::Blur => "Blur",
             Self::ParallaxY => "Parallax Y",
+            Self::Width => "Width",
+            Self::Height => "Height",
         }
     }
 }
 
-/// One independently-timed property track within a scroll animation.
+/// One independently-timed property track. By default the action targets its trigger layer; an
+/// optional target lets a trigger animate another layer on the same page.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AnimationStep {
     pub property: AnimationProperty,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<NodeId>,
     pub from: f64,
     pub to: f64,
     /// Normalised position on the parent timeline (0..=1).
@@ -906,7 +911,7 @@ pub struct AnimationStep {
 
 impl Default for AnimationStep {
     fn default() -> Self {
-        Self { property: AnimationProperty::Opacity, from: 0.0, to: 1.0, start: 0.0, end: 1.0, easing: Easing::EaseOut }
+        Self { property: AnimationProperty::Opacity, target: None, from: 0.0, to: 1.0, start: 0.0, end: 1.0, easing: Easing::EaseOut }
     }
 }
 
@@ -919,6 +924,7 @@ impl AnimationStep {
             AnimationProperty::Opacity => (0.0, 1.0),
             AnimationProperty::Scale => (0.0, 100.0),
             AnimationProperty::Blur => (0.0, crate::MAX_BLUR_RADIUS),
+            AnimationProperty::Width | AnimationProperty::Height => (0.0, 100_000.0),
             AnimationProperty::TranslateX | AnimationProperty::TranslateY | AnimationProperty::Rotate | AnimationProperty::ParallaxY => (-10_000.0, 10_000.0),
         };
         self.from = finite(self.from, 0.0, low, high);

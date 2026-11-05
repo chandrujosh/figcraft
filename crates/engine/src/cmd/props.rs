@@ -34,7 +34,7 @@ fontVariations / variationSettings ({axis: number}, e.g. {\"wght\": 550, \"wdth\
 path (a vector's SVG path data: replaces its geometry, keeping the layer, its paints, styles and bindings; width/height in the same call scale it as \
 node.create does; its own box goes at the layer's x/y, or with x/y given, at x + its left edge and y + its top as node.create places it), pointCount, innerRadius, arcStart, arcSweep, \
 arcInner, booleanOperation (a boolean group's operation, or an operand's own; null: the group's), operandOperation (a layer in a boolean \
-group: how it combines with the operands below it; null: the group's), constrainProportions, description, interactions, overflow, scrollAnimations [{name, enabled?, trigger: whileScrollingInView|whileScrolling|scrollIntoView|scrollOutOfView, start?, end?, durationMs?, delayMs?, reverse?, steps [{property: opacity|translateX|translateY|scale|rotate|blur|parallaxY, from, to, start?, end?, easing?}]}], pluginData {k: v}";
+group: how it combines with the operands below it; null: the group's), constrainProportions, description, interactions, overflow, scrollAnimations [{name, enabled?, trigger: whileScrollingInView|whileScrolling|scrollIntoView|scrollOutOfView, start?, end?, durationMs?, delayMs?, reverse?, steps [{property: opacity|translateX|translateY|scale|rotate|blur|parallaxY|width|height, target?, from, to, start?, end?, easing?}]}], pluginData {k: v}";
 
 /// CRLF, bare CR, U+2028 and U+2029 become LF, the only line ending text layout understands (editor insertion does the same).
 pub(crate) fn normalize_line_endings(s: &str) -> String {
