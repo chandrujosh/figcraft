@@ -303,7 +303,7 @@ export default function App() {
     const doc=iframeRef.current?.contentDocument,el=doc?.querySelector(selectorFor(id));
     if(!el||!name.trim())return;
     el.setAttribute("data-avab-name",name.trim());refreshLayers();
-    const html="<!doctype html>\n"+doc!.documentElement.outerHTML;
+    const html=serializeFrame(iframeRef.current!);
     commit(d=>{d.html=html;},"Layer renamed");
   };
   const toggleLayer=(id:string,kind:"hidden"|"locked")=>{
@@ -311,7 +311,7 @@ export default function App() {
     if(!el)return;
     if(kind==="hidden")el.style.display=el.style.display==="none"?"":"none";
     else el.style.pointerEvents=el.style.pointerEvents==="none"?"":"none";
-    const html="<!doctype html>\n"+iframeRef.current!.contentDocument!.documentElement.outerHTML;
+    const html=serializeFrame(iframeRef.current!);
     commit(d=>{d.html=html;},kind==="hidden"?"Layer visibility changed":"Layer lock toggled");
   };
   const moveLayer=(id:string,direction:-1|1)=>{
@@ -320,7 +320,7 @@ export default function App() {
     const siblings=[...el.parentElement.children],i=siblings.indexOf(el);
     if(direction<0&&i>0)el.parentElement.insertBefore(el,siblings[i-1]);
     if(direction>0&&i<siblings.length-1)el.parentElement.insertBefore(siblings[i+1],el);
-    const html="<!doctype html>\n"+iframeRef.current!.contentDocument!.documentElement.outerHTML;
+    const html=serializeFrame(iframeRef.current!);
     commit(d=>{d.html=html;},"Layer order changed");refreshLayers();
   };
   const duplicateLayer=(id:string)=>{
@@ -329,7 +329,7 @@ export default function App() {
     const copy=el.cloneNode(true) as HTMLElement;
     const newId=makeId("layer");copy.setAttribute("data-avab-id",newId);copy.setAttribute("data-avab-name",`${el.getAttribute("data-avab-name")||el.tagName} copy`);
     el.parentElement.insertBefore(copy,el.nextSibling);
-    const html="<!doctype html>\n"+iframeRef.current!.contentDocument!.documentElement.outerHTML;
+    const html=serializeFrame(iframeRef.current!);
     commit(d=>{d.html=html;},"Layer duplicated");setSelected(newId);refreshLayers();
   };
   const groupLayer=(id:string)=>{
@@ -338,7 +338,7 @@ export default function App() {
     const wrapper=iframeRef.current!.contentDocument!.createElement("div");
     wrapper.setAttribute("data-avab-id",makeId("group"));wrapper.setAttribute("data-avab-name","Group");
     el.parentElement.insertBefore(wrapper,el);wrapper.appendChild(el);
-    const html="<!doctype html>\n"+iframeRef.current!.contentDocument!.documentElement.outerHTML;
+    const html=serializeFrame(iframeRef.current!);
     commit(d=>{d.html=html;},"Layer grouped");refreshLayers();
   };
   const scrub=(value:number)=>{
