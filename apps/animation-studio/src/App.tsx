@@ -76,6 +76,7 @@ export default function App() {
   const [showPresets, setShowPresets] = useState(false);
   const [customPresets, setCustomPresets] = useState<PropertyTrack[]>(()=>{try{return JSON.parse(localStorage.getItem("figcraft-motion-presets-v1")||"[]") as PropertyTrack[];}catch{return [];}});
   const [draggingKeyframe,setDraggingKeyframe]=useState<{trackId:string;keyId:string;at:number}|null>(null);
+  const [trackClipboard,setTrackClipboard]=useState<PropertyTrack|null>(null);
   const [renaming, setRenaming] = useState("");
   const [dragLayer, setDragLayer] = useState("");
   const [status, setStatus] = useState("Ready");
@@ -325,6 +326,24 @@ export default function App() {
     copy.keyframes=copy.keyframes.map(k=>({...k,id:makeId("kf")}));
     commit(d=>d.sequences.find(x=>x.id===currentSequence.id)?.tracks.push(copy),"Custom preset applied");
     setActiveTrackId(copy.id);setShowPresets(false);setTab("Animate");
+  };
+  const copyTrack=()=>{
+    if(!currentTrack)return;
+    setTrackClipboard(clone(currentTrack));setStatus("Animation action copied");
+  };
+  const pasteTrack=()=>{
+    if(!currentSequence||!trackClipboard)return;
+    const copy=clone(trackClipboard);copy.id=makeId("track");copy.target=selectorForMany(selectedIds);
+    copy.keyframes=copy.keyframes.map(k=>({...k,id:makeId("kf")}));
+    commit(d=>d.sequences.find(x=>x.id===currentSequence.id)?.tracks.push(copy),"Animation action pasted");
+    setActiveTrackId(copy.id);setTab("Animate");
+  };
+  const duplicateTrack=()=>{
+    if(!currentTrack||!currentSequence)return;
+    const copy=clone(currentTrack);copy.id=makeId("track");copy.label=copy.label+" copy";
+    copy.keyframes=copy.keyframes.map(k=>({...k,id:makeId("kf")}));
+    commit(d=>d.sequences.find(x=>x.id===currentSequence.id)?.tracks.push(copy),"Animation action duplicated");
+    setActiveTrackId(copy.id);
   };
   const removeTrack=()=>{
     if(!currentSequence||!currentTrack)return;
@@ -632,7 +651,7 @@ load(GSAP).then(function(){return load(SCROLL);}).then(function(){return fetch("
         <nav className="inspector-tabs">{(["Trigger","Animate","Timeline","Motion","Advanced"] as Tab[]).map(t=><button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{t}</button>)}</nav>
         <div className="inspector-content">
           {tab==="Trigger"&&<TriggerInspector sequence={currentSequence} update={updateTrigger} updateName={name=>updateSequence({name})} addSequence={addSequence} duplicateSequence={duplicateSequence}/>}
-          {tab==="Animate"&&<AnimateInspector addTrack={addTrack} track={currentTrack} updateTrack={updateTrack} removeTrack={removeTrack} addKeyframe={addKeyframe} savePreset={saveCurrentPreset} selected={selected}/>}
+          {tab==="Animate"&&<AnimateInspector addTrack={addTrack} track={currentTrack} updateTrack={updateTrack} removeTrack={removeTrack} addKeyframe={addKeyframe} savePreset={saveCurrentPreset} copyTrack={copyTrack} pasteTrack={pasteTrack} duplicateTrack={duplicateTrack} hasClipboard={Boolean(trackClipboard)} selected={selected}/>}
           {tab==="Timeline"&&<TimelineInspector sequence={currentSequence} track={currentTrack} updateKeyframe={updateKeyframe} playhead={playhead}/>}
           {tab==="Motion"&&<MotionInspector sequence={currentSequence} update={updateMotion}/>}
           {tab==="Advanced"&&<AdvancedInspector sequence={currentSequence} updateTrigger={updateTrigger} breakpoint={breakpoint} track={currentTrack} commit={commit} readCss={readCss} writeCss={writeCss}/>}
@@ -661,9 +680,9 @@ function TriggerInspector({sequence,update,updateName,addSequence,duplicateSeque
  <Section title="Scroll actions"><Field label="Pin element" value={sequence.trigger.pin} type="checkbox" onChange={v=>update({pin:Boolean(v)})}/><Field label="Pin target" value={sequence.trigger.pinTarget} onChange={v=>update({pinTarget:String(v)})}/><Field label="Pin spacing" value={sequence.trigger.pinSpacing} type="checkbox" onChange={v=>update({pinSpacing:Boolean(v)})}/><Field label="Toggle actions" value={sequence.trigger.toggleActions} onChange={v=>update({toggleActions:String(v)})}/><Field label="Once only" value={sequence.trigger.once} type="checkbox" onChange={v=>update({once:Boolean(v)})}/><Field label="Reverse on scroll up" value={sequence.trigger.reverse} type="checkbox" onChange={v=>update({reverse:Boolean(v)})}/><Field label="Snap points" value={sequence.trigger.snap} type="number" onChange={v=>update({snap:Number(v)})}/><Field label="Debug markers" value={sequence.trigger.markers} type="checkbox" onChange={v=>update({markers:Boolean(v)})}/></Section>
  <Section title="Event settings"><Field label="Delay" value={sequence.trigger.delay} unit="ms" type="number" onChange={v=>update({delay:Number(v)})}/><Field label="Visibility threshold" value={sequence.trigger.threshold} unit="px" type="number" onChange={v=>update({threshold:Number(v)})}/><Field label="Depends on sequence ID" value={sequence.trigger.dependsOn} onChange={v=>update({dependsOn:String(v)})}/></Section></>;
 }
-function AnimateInspector({addTrack,track,updateTrack,removeTrack,addKeyframe,savePreset,selected}:{addTrack:(p:AnimProperty)=>void;track?:PropertyTrack;updateTrack:(v:Partial<PropertyTrack>)=>void;removeTrack:()=>void;addKeyframe:()=>void;savePreset:()=>void;selected:string}){
+function AnimateInspector({addTrack,track,updateTrack,removeTrack,addKeyframe,savePreset,copyTrack,pasteTrack,duplicateTrack,hasClipboard,selected}:{addTrack:(p:AnimProperty)=>void;track?:PropertyTrack;updateTrack:(v:Partial<PropertyTrack>)=>void;removeTrack:()=>void;addKeyframe:()=>void;savePreset:()=>void;copyTrack:()=>void;pasteTrack:()=>void;duplicateTrack:()=>void;hasClipboard:boolean;selected:string}){
  return <><Section title="Add property action">{PROPERTY_GROUPS.map(g=><div className="property-group" key={g.label}><b>{g.label}</b><div className="property-buttons">{g.properties.map(p=><button key={p} onClick={()=>addTrack(p)}>{PROPERTY_META[p].label}</button>)}</div></div>)}</Section>
- {track?<Section title={`Selected action · ${track.label}`}><Field label="Action name" value={track.label} onChange={v=>updateTrack({label:String(v)})}/><Field label="Target selector" value={track.target} onChange={v=>updateTrack({target:String(v)})}/><Field label="Track start time" value={track.startTime} unit="s" type="number" step={.05} onChange={v=>updateTrack({startTime:Math.max(0,Number(v))})}/><Field label="Property" value={track.property} type="select" options={PROPERTY_GROUPS.flatMap(g=>g.properties)} onChange={v=>updateTrack({property:v as AnimProperty})}/><Field label="Enabled" value={track.enabled} type="checkbox" onChange={v=>updateTrack({enabled:Boolean(v)})}/><div className="keyframe-editor">{track.keyframes.map((k,i)=><div className="keyframe-row" key={k.id}><b>K{i+1}</b><Field label="Time" value={k.at} unit="s" type="number" step={.01} onChange={v=>updateTrack({keyframes:track.keyframes.map(x=>x.id===k.id?{...x,at:Number(v)}:x)})}/><Field label="Value" value={k.value} onChange={v=>updateTrack({keyframes:track.keyframes.map(x=>x.id===k.id?{...x,value:typeof v==="boolean"?String(v):v}:x)})}/><button onClick={()=>updateTrack({keyframes:track.keyframes.filter(x=>x.id!==k.id)})}>×</button></div>)}</div><button className="wide-outline" onClick={addKeyframe}>＋ Add keyframe at playhead</button><button className="wide-outline" onClick={savePreset}>✦ Save as reusable preset</button><button className="wide-danger" onClick={removeTrack}>Remove action</button></Section>:<div className="empty-inspector"><p>Add a property action, then select its track to edit keyframes and targets.</p></div>}</>;
+ {track?<Section title={`Selected action · ${track.label}`}><Field label="Action name" value={track.label} onChange={v=>updateTrack({label:String(v)})}/><Field label="Target selector" value={track.target} onChange={v=>updateTrack({target:String(v)})}/><Field label="Track start time" value={track.startTime} unit="s" type="number" step={.05} onChange={v=>updateTrack({startTime:Math.max(0,Number(v))})}/><Field label="Property" value={track.property} type="select" options={PROPERTY_GROUPS.flatMap(g=>g.properties)} onChange={v=>updateTrack({property:v as AnimProperty})}/><Field label="Enabled" value={track.enabled} type="checkbox" onChange={v=>updateTrack({enabled:Boolean(v)})}/><div className="keyframe-editor">{track.keyframes.map((k,i)=><div className="keyframe-row" key={k.id}><b>K{i+1}</b><Field label="Time" value={k.at} unit="s" type="number" step={.01} onChange={v=>updateTrack({keyframes:track.keyframes.map(x=>x.id===k.id?{...x,at:Number(v)}:x)})}/><Field label="Value" value={k.value} onChange={v=>updateTrack({keyframes:track.keyframes.map(x=>x.id===k.id?{...x,value:typeof v==="boolean"?String(v):v}:x)})}/><button onClick={()=>updateTrack({keyframes:track.keyframes.filter(x=>x.id!==k.id)})}>×</button></div>)}</div><button className="wide-outline" onClick={addKeyframe}>＋ Add keyframe at playhead</button><div className="action-clipboard"><button className="wide-outline" onClick={copyTrack}>Copy action</button><button className="wide-outline" disabled={!hasClipboard} onClick={pasteTrack}>Paste action</button><button className="wide-outline" onClick={duplicateTrack}>Duplicate action</button></div><button className="wide-outline" onClick={savePreset}>✦ Save as reusable preset</button><button className="wide-danger" onClick={removeTrack}>Remove action</button></Section>:<div className="empty-inspector"><p>Add a property action, then select its track to edit keyframes and targets.</p></div>}</>;
 }
 function TimelineInspector({sequence,track,updateKeyframe,playhead}:{sequence?:AnimationSequence;track?:PropertyTrack;updateKeyframe:(trackId:string,keyId:string,patch:Partial<Keyframe>)=>void;playhead:number}){
  if(!sequence||!track)return <div className="empty-inspector"><p>Select an animation track to edit its keyframes.</p></div>;
