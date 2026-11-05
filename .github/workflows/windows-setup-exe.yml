@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/native-scroll-animation
+      - feature/advanced-visual-animation-builder
     paths:
       - packaging/windows/**
       - build-windows-setup.ps1
