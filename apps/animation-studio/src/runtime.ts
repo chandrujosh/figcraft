@@ -38,7 +38,7 @@ function splitText(el:Element,mode:string):HTMLElement[]{
  return result;
 }
 function easeValue(name:string):string|((progress:number)=>number){
- const match=name.match(/^cubic\\(([-+0-9.e]+),\\s*([-+0-9.e]+),\\s*([-+0-9.e]+),\\s*([-+0-9.e]+)\\)$/);
+ const match=name.match(/^cubic\(([-+0-9.e]+),\s*([-+0-9.e]+),\s*([-+0-9.e]+),\s*([-+0-9.e]+)\)$/);
  if(!match)return name;
  const [x1,y1,x2,y2]=match.slice(1).map(Number);
  const bez=(t:number,a:number,b:number)=>3*(1-t)*(1-t)*t*a+3*(1-t)*t*t*b+t*t*t;
