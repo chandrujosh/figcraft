@@ -30,7 +30,7 @@ function splitText(el:Element,mode:string):HTMLElement[]{
  const result:HTMLElement[]=[];
  for(const piece of pieces){
   if(!piece){continue;}
-  if(/^\s+$/.test(piece)){html.append(document.createTextNode(piece));continue;}
+  if(/^\s+$/.test(piece)){html.append(html.ownerDocument.createTextNode(piece));continue;}
   const span=html.ownerDocument.createElement("span");
   span.className="avab-split-unit";span.style.display="inline-block";span.style.whiteSpace="pre";
   span.textContent=piece;html.append(span);result.push(span);
@@ -95,120 +95,180 @@ function getStart(seq:AnimationSequence):string{
   default:return seq.trigger.start;
  }
 }
-function makeTimeline(seq:AnimationSequence,doc:Document,hooks:Hooks,warnings:string[],breakpoint:Breakpoint):gsap.core.Timeline|null{
+function makeTimeline(seq:AnimationSequence,doc:Document,win:Window,hooks:Hooks,warnings:string[],breakpoint:Breakpoint):gsap.core.Timeline|null{
  const motion=seq.motion;
- if(motion.respectReducedMotion&&window.matchMedia("(prefers-reduced-motion: reduce)").matches)return null;
- const tl=gsap.timeline({paused:true,repeat:motion.repeat,repeatDelay:motion.repeatDelay,yoyo:motion.yoyo,timeScale:Math.max(.05,motion.speed),onStart:()=>{hooks.onSequenceStart?.(seq.id);window.dispatchEvent(new CustomEvent("avab:animation-start",{detail:{id:seq.id}}));},onComplete:()=>{hooks.onSequenceComplete?.(seq.id);window.dispatchEvent(new CustomEvent("avab:animation-complete",{detail:{id:seq.id}}));}});
- seq.tracks.forEach((track,index)=>{
+ if(motion.respectReducedMotion&&win.matchMedia("(prefers-reduced-motion: reduce)").matches)return null;
+ const tl=gsap.timeline({paused:true,repeat:motion.repeat,repeatDelay:motion.repeatDelay,yoyo:motion.yoyo,timeScale:Math.max(.05,motion.speed),onStart:()=>{hooks.onSequenceStart?.(seq.id);win.dispatchEvent(new CustomEvent("avab:animation-start",{detail:{id:seq.id}}));},onComplete:()=>{hooks.onSequenceComplete?.(seq.id);win.dispatchEvent(new CustomEvent("avab:animation-complete",{detail:{id:seq.id}}));}});
+ seq.tracks.forEach(track=>{
   const override=track.overrides?.[breakpoint];
   if(override?.enabled===false)return;
   const activeTrack=override?.keyframes?{...track,keyframes:override.keyframes}:track;
   easeTracks(tl,doc,activeTrack,seq.trigger.target,0,motion.stagger?{each:motion.staggerAmount,from:motion.staggerFrom}:undefined,warnings);
  });
- if(motion.direction==="reverse")tl.reversed(true);
+ if(motion.direction==="reverse"||motion.direction==="alternate-reverse")tl.reversed(true);
  if(motion.direction==="alternate"||motion.direction==="alternate-reverse")tl.yoyo(true);
  return tl;
 }
+
 export function mountAnimations(project:StudioProject,doc:Document,win:Window,hooks:Hooks={}):AnimationController{
- const items:RuntimeItem[]=[];
- const warnings:string[]=[];
+ let items:RuntimeItem[]=[];
+ let warnings:string[]=[];
  let dead=false;
- const cleanups:(()=>void)[]=[];
- const warn=(v:string)=>warnings.push(v);
- const current=breakpointFor(win);
- for(const seq of project.sequences){
-  if(!seq.enabled)continue;
-  const breakpoint=breakpointFor(win);
-  const triggerTarget=targets(doc,seq.trigger.target)[0]??doc.body;
-  const tl=makeTimeline(seq,doc,hooks,warnings,breakpoint);
-  if(!tl)continue;
-  const cleanup:(()=>void)[]=[];
-  const add=(target:EventTarget,event:string,handler:EventListener,options?:AddEventListenerOptions)=>{
-   target.addEventListener(event,handler,options);cleanup.push(()=>target.removeEventListener(event,handler,options));
-  };
-  const trigger=seq.trigger;
-  let st:ScrollTrigger|undefined;
-  if(isScroll(trigger.type)){
-   const scroller=trigger.scroller?targets(doc,trigger.scroller)[0]:win;
-   const scrub=trigger.scrub||trigger.type==="scrollProgress"||trigger.type==="whileScrollingInView"||trigger.type==="pageScrolling";
-   st=ScrollTrigger.create({
-    trigger:trigger.type==="pageScrolling"?doc.documentElement:triggerTarget,
-    scroller:scroller as Element|Window,
-    animation:tl,
-    start:getStart(seq),
-    end:trigger.type==="pageScrolling"?()=>Math.max(doc.documentElement.scrollHeight-win.innerHeight,win.innerHeight):trigger.end||"bottom 15%",
-    horizontal:trigger.horizontal,
-    scrub:scrub?(trigger.smoothing>0?trigger.smoothing:true):false,
-    pin:trigger.pin?(trigger.pinTarget?targets(doc,trigger.pinTarget)[0]??triggerTarget:triggerTarget):false,
-    pinSpacing:trigger.pinSpacing,
-    toggleActions:trigger.toggleActions||"play none none reverse",
-    once:trigger.once,
-    markers:trigger.markers,
-    snap:trigger.snap>0?{snapTo:1/trigger.snap,duration:.25,delay:.1,ease:"power1.inOut"}:false,
-    onUpdate:self=>{
-     if(trigger.type==="scrollDown"&&self.direction>0)tl.play();
-     if(trigger.type==="scrollUp"&&self.direction<0)tl.play();
-     if(trigger.type==="pageScrolled"&&self.progress>0)tl.play();
+ let lastBreakpoint=breakpointFor(win);
+ const snapshots=new Map<Element,{style:string|null;html?:string;split?:string|null}>();
+ const snapshotTargets=()=>{
+  for(const seq of project.sequences){
+   if(!seq.enabled)continue;
+   for(const track of seq.tracks){
+    for(const el of targets(doc,track.target||seq.trigger.target)){
+     if(snapshots.has(el))continue;
+     snapshots.set(el,{style:el.getAttribute("style"),html:track.property==="textReveal"?el.innerHTML:undefined,split:el.getAttribute("data-avab-split")});
     }
-   });
-   cleanup.push(()=>st?.kill());
-  }else if(trigger.type==="elementVisible"){
-   const io=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){tl.restart();if(trigger.once)io.disconnect();}},{threshold:Math.max(0,Math.min(1,trigger.threshold/1000))});
-   io.observe(triggerTarget);cleanup.push(()=>io.disconnect());
-  }else{
-   const play=()=>{if(trigger.delay>0)win.setTimeout(()=>tl.restart(),trigger.delay);else tl.restart();};
-   const reverse=()=>tl.reverse();
-   const events:Partial<Record<TriggerType,string>>={elementClick:"click",buttonClick:"click",elementHover:"mouseenter",mouseEnter:"mouseenter",mouseLeave:"mouseleave",doubleClick:"dblclick",pointerDown:"pointerdown",pointerUp:"pointerup"};
-   const event=events[trigger.type];
-   if(event){add(triggerTarget,event,play as EventListener);if(trigger.type==="elementHover")add(triggerTarget,"mouseleave",reverse as EventListener);}
-   else if(trigger.type==="mouseMove"||trigger.type==="drag"){
-    let down=false;
-    add(triggerTarget,"pointerdown",(()=>{down=true;}) as EventListener);
-    add(win,"pointerup",(()=>{down=false;}) as EventListener);
-    add(triggerTarget,"pointermove",((e:PointerEvent)=>{if(trigger.type==="drag"&&!down)return;const b=triggerTarget.getBoundingClientRect();const progress=trigger.horizontal?(e.clientX-b.left)/Math.max(1,b.width):(e.clientY-b.top)/Math.max(1,b.height);tl.progress(Math.max(0,Math.min(1,progress)));}) as EventListener);
-   }else if(trigger.type==="customEvent"){
-    add(win,trigger.eventName||"studio:animate",play as EventListener);
-   }else if(trigger.type==="classChange"){
-    const observer=new MutationObserver(()=>{if(triggerTarget.classList.contains(trigger.className))play();});
-    observer.observe(triggerTarget,{attributes:true,attributeFilter:["class"]});cleanup.push(()=>observer.disconnect());
-   }else if(trigger.type==="navigation"){
-    add(win,"popstate",play as EventListener);add(win,"hashchange",play as EventListener);
-   }else if(trigger.type==="pageTransition"){
-    add(win,"avab:page-transition",play as EventListener);
-   }else if(trigger.type==="animationStart"||trigger.type==="animationComplete"){
-    const eventName=trigger.type==="animationStart"?"avab:animation-start":"avab:animation-complete";
-    const listener=((e:Event)=>{const id=(e as CustomEvent).detail?.id;if(!trigger.dependsOn||id===trigger.dependsOn)play();}) as EventListener;
-    add(win,eventName,listener);
-   }else if(["pageLoad","afterPageLoad","pageReady","delay"].includes(trigger.type)){
-    const fire=()=>play();
-    if(trigger.type==="pageReady"){
-     if(doc.readyState==="complete"||doc.readyState==="interactive")void doc.fonts?.ready.then(fire);
-     else add(doc,"DOMContentLoaded",(()=>void doc.fonts?.ready.then(fire)) as EventListener,{once:true});
-    }else if(trigger.type==="delay"){const timer=win.setTimeout(fire,trigger.delay);cleanup.push(()=>win.clearTimeout(timer));}
-    else if(trigger.type==="pageLoad"&&doc.readyState==="complete")fire();
-    else add(win,"load",fire as EventListener,{once:true});
    }
   }
-  items.push({timeline:tl,trigger:st,cleanup,sequence:seq});
- }
- hooks.onWarning?.(warnings);
- let resizeTimer=0;
- const refresh=()=>{if(dead)return;items.forEach(item=>{const bp=breakpointFor(win);if(bp===current)return;});ScrollTrigger.refresh();};
- win.addEventListener("resize",refresh);
- cleanups.push(()=>win.removeEventListener("resize",refresh));
+ };
+ const restoreTargets=()=>{
+  for(const [el,original] of snapshots){
+   if(original.style===null)el.removeAttribute("style");else el.setAttribute("style",original.style);
+   if(original.html!==undefined)el.innerHTML=original.html;
+   if(original.split===null)el.removeAttribute("data-avab-split");else if(original.split!==undefined)el.setAttribute("data-avab-split",original.split);
+  }
+  snapshots.clear();
+ };
+ const disposeItems=()=>{
+  items.forEach(item=>{
+   item.cleanup.forEach(fn=>fn());
+   item.trigger?.kill();
+   item.timeline.kill();
+  });
+  items=[];
+  restoreTargets();
+ };
+ const configure=()=>{
+  if(dead)return;
+  warnings=[];
+  const breakpoint=breakpointFor(win);
+  snapshotTargets();
+  for(const seq of project.sequences){
+   if(!seq.enabled)continue;
+   const triggerTarget=targets(doc,seq.trigger.target)[0]??doc.body;
+   const tl=makeTimeline(seq,doc,win,hooks,warnings,breakpoint);
+   if(!tl)continue;
+   const cleanup:(()=>void)[]=[];
+   const add=(target:EventTarget,event:string,handler:EventListener,options?:AddEventListenerOptions)=>{
+    target.addEventListener(event,handler,options);
+    cleanup.push(()=>target.removeEventListener(event,handler,options));
+   };
+   const trigger=seq.trigger;
+   let st:ScrollTrigger|undefined;
+   if(isScroll(trigger.type)){
+    const scroller=trigger.scroller?targets(doc,trigger.scroller)[0]:win;
+    const scrub=trigger.scrub||trigger.type==="scrollProgress"||trigger.type==="whileScrollingInView"||trigger.type==="pageScrolling";
+    const triggerEl=trigger.type==="pageScrolling"||trigger.type==="pageScrolled"?doc.documentElement:triggerTarget;
+    st=ScrollTrigger.create({
+     trigger:triggerEl,
+     scroller:scroller as Element|Window,
+     animation:tl,
+     start:getStart(seq),
+     end:trigger.type==="pageScrolling"?()=>Math.max(doc.documentElement.scrollHeight-win.innerHeight,win.innerHeight):trigger.end||"bottom 15%",
+     horizontal:trigger.horizontal,
+     scrub:scrub?(trigger.smoothing>0?trigger.smoothing:true):false,
+     pin:trigger.pin?(trigger.pinTarget?targets(doc,trigger.pinTarget)[0]??triggerTarget:triggerTarget):false,
+     pinSpacing:trigger.pinSpacing,
+     toggleActions:trigger.toggleActions||"play none none reverse",
+     once:trigger.once,
+     markers:trigger.markers,
+     snap:trigger.snap>0?{snapTo:1/trigger.snap,duration:.25,delay:.1,ease:"power1.inOut"}:false,
+     onUpdate:self=>{
+      if(trigger.type==="scrollDown"&&self.direction>0)tl.play();
+      if(trigger.type==="scrollUp"&&self.direction<0)tl.play();
+      if(trigger.type==="pageScrolled"&&self.progress>0)tl.play();
+     }
+    });
+    cleanup.push(()=>st?.kill());
+   }else if(trigger.type==="elementVisible"){
+    const IO=win.IntersectionObserver;
+    if(IO){
+     const io=new IO(entries=>{if(entries.some(e=>e.isIntersecting)){tl.restart();if(trigger.once)io.disconnect();}},{threshold:Math.max(0,Math.min(1,trigger.threshold/1000))});
+     io.observe(triggerTarget);cleanup.push(()=>io.disconnect());
+    }else warn("IntersectionObserver is unavailable in this preview browser.");
+   }else{
+    const play=()=>{if(trigger.delay>0)win.setTimeout(()=>tl.restart(),trigger.delay);else tl.restart();};
+    const reverse=()=>tl.reverse();
+    const events:Partial<Record<TriggerType,string>>={elementClick:"click",buttonClick:"click",elementHover:"mouseenter",mouseEnter:"mouseenter",mouseLeave:"mouseleave",doubleClick:"dblclick",pointerDown:"pointerdown",pointerUp:"pointerup"};
+    const event=events[trigger.type];
+    if(event){
+     add(triggerTarget,event,play as EventListener);
+     if(trigger.type==="elementHover")add(triggerTarget,"mouseleave",reverse as EventListener);
+     if(trigger.type==="buttonClick"&&triggerTarget.tagName.toLowerCase()!=="button"&&triggerTarget.getAttribute("role")!=="button")warn(`Button click trigger target is not a button: ${triggerTarget.tagName.toLowerCase()}`);
+    }else if(trigger.type==="mouseMove"||trigger.type==="drag"){
+     let down=false;
+     add(triggerTarget,"pointerdown",(()=>{down=true;}) as EventListener);
+     add(win,"pointerup",(()=>{down=false;}) as EventListener);
+     add(triggerTarget,"pointermove",((e:PointerEvent)=>{
+      if(trigger.type==="drag"&&!down)return;
+      const b=triggerTarget.getBoundingClientRect();
+      const progress=trigger.horizontal?(e.clientX-b.left)/Math.max(1,b.width):(e.clientY-b.top)/Math.max(1,b.height);
+      tl.progress(Math.max(0,Math.min(1,progress)));
+     }) as EventListener);
+    }else if(trigger.type==="customEvent"){
+     add(win,trigger.eventName||"studio:animate",play as EventListener);
+    }else if(trigger.type==="classChange"){
+     const observer=new MutationObserver(()=>{if(triggerTarget.classList.contains(trigger.className))play();});
+     observer.observe(triggerTarget,{attributes:true,attributeFilter:["class"]});cleanup.push(()=>observer.disconnect());
+    }else if(trigger.type==="navigation"){
+     add(win,"popstate",play as EventListener);add(win,"hashchange",play as EventListener);
+    }else if(trigger.type==="pageTransition"){
+     add(win,"avab:page-transition",play as EventListener);
+    }else if(trigger.type==="animationStart"||trigger.type==="animationComplete"){
+     const eventName=trigger.type==="animationStart"?"avab:animation-start":"avab:animation-complete";
+     const listener=((e:Event)=>{const id=(e as CustomEvent).detail?.id;if(id!==seq.id&&(!trigger.dependsOn||id===trigger.dependsOn))play();}) as EventListener;
+     add(win,eventName,listener);
+    }else if(["pageLoad","afterPageLoad","pageReady","delay"].includes(trigger.type)){
+     const fire=()=>play();
+     if(trigger.type==="pageReady"){
+      if(doc.readyState==="complete"||doc.readyState==="interactive")void doc.fonts?.ready.then(fire);
+      else add(doc,"DOMContentLoaded",(()=>void doc.fonts?.ready.then(fire)) as EventListener,{once:true});
+     }else if(trigger.type==="delay"){
+      const timer=win.setTimeout(fire,trigger.delay);cleanup.push(()=>win.clearTimeout(timer));
+     }else if(trigger.type==="pageLoad"&&doc.readyState==="complete")fire();
+     else if(trigger.type==="afterPageLoad"){
+      const load=()=>{const timer=win.setTimeout(fire,trigger.delay);cleanup.push(()=>win.clearTimeout(timer));};
+      if(doc.readyState==="complete")load();else add(win,"load",load as EventListener,{once:true});
+     }else add(win,"load",fire as EventListener,{once:true});
+    }
+   }
+   items.push({timeline:tl,trigger:st,cleanup,sequence:seq});
+  }
+  hooks.onWarning?.([...warnings]);
+ };
+ const refresh=()=>{
+  if(dead)return;
+  const next=breakpointFor(win);
+  if(next!==lastBreakpoint){
+   disposeItems();
+   lastBreakpoint=next;
+   configure();
+  }
+  ScrollTrigger.refresh();
+ };
+ const onResize=()=>refresh();
+ win.addEventListener("resize",onResize);
+ configure();
  return {
   warnings,
   play:id=>items.find(x=>x.sequence.id===id)?.timeline.restart(),
   pause:id=>items.find(x=>x.sequence.id===id)?.timeline.pause(),
   seek:(id,time)=>{
    const item=items.find(x=>x.sequence.id===id);
-   if(item){item.timeline.pause();item.timeline.time(Math.max(0,Math.min(item.timeline.duration(),time))); }
+   if(item){item.timeline.pause();item.timeline.time(Math.max(0,Math.min(item.timeline.duration(),time)));}
   },
-  refresh:()=>{ScrollTrigger.refresh();},
+  refresh,
   destroy:()=>{
-   dead=true;win.removeEventListener("resize",refresh);
-   items.forEach(item=>{item.cleanup.forEach(fn=>fn());item.timeline.kill();});
-   cleanups.forEach(fn=>fn());
+   if(dead)return;
+   dead=true;
+   win.removeEventListener("resize",onResize);
+   disposeItems();
    ScrollTrigger.refresh();
   }
  };
