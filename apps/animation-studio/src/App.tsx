@@ -9,25 +9,37 @@ type Tab = "Trigger" | "Animate" | "Timeline" | "Motion" | "Advanced";
 const STORAGE_KEY = "figcraft-motion-studio-v1";
 const DEMO: StudioProject = { version: 1, name: "Motion Studio Demo", html: prepareHtml(makeSampleHtml()), sequences: [] };
 
-const PRESETS: { group: string; name: string; property: AnimProperty; from: number | string; to: number | string; ease: string }[] = [
-  {group:"Entrance",name:"Fade In",property:"opacity",from:0,to:100,ease:"power2.out"},
-  {group:"Entrance",name:"Fade Up",property:"y",from:64,to:0,ease:"power3.out"},
-  {group:"Entrance",name:"Fade Down",property:"y",from:-64,to:0,ease:"power3.out"},
-  {group:"Entrance",name:"Fade Left",property:"x",from:80,to:0,ease:"power3.out"},
-  {group:"Entrance",name:"Fade Right",property:"x",from:-80,to:0,ease:"power3.out"},
-  {group:"Entrance",name:"Zoom In",property:"scaleX",from:0.72,to:1,ease:"power3.out"},
-  {group:"Entrance",name:"Zoom Out",property:"scaleX",from:1.2,to:1,ease:"power3.out"},
-  {group:"Entrance",name:"Rotate In",property:"rotation",from:-16,to:0,ease:"back.out(1.7)"},
-  {group:"Entrance",name:"Blur In",property:"blur",from:18,to:0,ease:"power2.out"},
-  {group:"Text",name:"Word Reveal",property:"textReveal",from:"words",to:"words",ease:"power3.out"},
-  {group:"Text",name:"Character Reveal",property:"textReveal",from:"characters",to:"characters",ease:"power3.out"},
-  {group:"Image",name:"Image Reveal",property:"clipPath",from:"inset(0 0 100% 0)",to:"inset(0 0 0% 0)",ease:"power3.inOut"},
-  {group:"Image",name:"Zoom Reveal",property:"scaleX",from:1.16,to:1,ease:"power2.out"},
-  {group:"Interaction",name:"Hover Scale",property:"scaleX",from:1,to:1.06,ease:"power2.out"},
-  {group:"Interaction",name:"Hover Lift",property:"y",from:0,to:-8,ease:"power2.out"},
-  {group:"Scroll",name:"Scroll Fade",property:"opacity",from:0,to:100,ease:"none"},
-  {group:"Scroll",name:"Scroll Parallax",property:"y",from:80,to:-80,ease:"none"},
-  {group:"Scroll",name:"Scroll Zoom",property:"scaleX",from:0.8,to:1,ease:"none"}
+const PRESETS: { group: string; name: string; property: AnimProperty; from: number | string; to: number | string; ease: string; trigger?: TriggerType; motion?: Partial<AnimationSequence["motion"]>; pin?: boolean }[] = [
+  {group:"Entrance",name:"Fade In",property:"opacity",from:0,to:100,ease:"power2.out",trigger:"pageReady"},
+  {group:"Entrance",name:"Fade Up",property:"y",from:64,to:0,ease:"power3.out",trigger:"pageReady"},
+  {group:"Entrance",name:"Fade Down",property:"y",from:-64,to:0,ease:"power3.out",trigger:"pageReady"},
+  {group:"Entrance",name:"Fade Left",property:"x",from:80,to:0,ease:"power3.out",trigger:"pageReady"},
+  {group:"Entrance",name:"Fade Right",property:"x",from:-80,to:0,ease:"power3.out",trigger:"pageReady"},
+  {group:"Entrance",name:"Zoom In",property:"scaleX",from:0.72,to:1,ease:"power3.out",trigger:"pageReady"},
+  {group:"Entrance",name:"Zoom Out",property:"scaleX",from:1.2,to:1,ease:"power3.out",trigger:"pageReady"},
+  {group:"Entrance",name:"Rotate In",property:"rotation",from:-16,to:0,ease:"back.out(1.7)",trigger:"pageReady"},
+  {group:"Entrance",name:"Blur In",property:"blur",from:18,to:0,ease:"power2.out",trigger:"pageReady"},
+  {group:"Text",name:"Word Reveal",property:"textReveal",from:"words",to:"words",ease:"power3.out",trigger:"scrollIntoView"},
+  {group:"Text",name:"Character Reveal",property:"textReveal",from:"characters",to:"characters",ease:"power3.out",trigger:"scrollIntoView"},
+  {group:"Text",name:"Line Reveal",property:"textReveal",from:"lines",to:"lines",ease:"power3.out",trigger:"scrollIntoView"},
+  {group:"Text",name:"Typewriter",property:"textReveal",from:"characters",to:"characters",ease:"none",trigger:"pageReady"},
+  {group:"Text",name:"Staggered Text",property:"textReveal",from:"words",to:"words",ease:"back.out(1.7)",trigger:"scrollIntoView"},
+  {group:"Text",name:"Mask Reveal",property:"clipPath",from:"inset(0 0 100% 0)",to:"inset(0 0 0% 0)",ease:"power3.inOut",trigger:"scrollIntoView"},
+  {group:"Image",name:"Image Reveal",property:"clipPath",from:"inset(0 0 100% 0)",to:"inset(0 0 0% 0)",ease:"power3.inOut",trigger:"scrollIntoView"},
+  {group:"Image",name:"Zoom Reveal",property:"scaleX",from:1.16,to:1,ease:"power2.out",trigger:"scrollIntoView"},
+  {group:"Image",name:"Parallax",property:"y",from:80,to:-80,ease:"none",trigger:"whileScrollingInView"},
+  {group:"Image",name:"Masked Image Reveal",property:"clipPath",from:"inset(0 100% 0 0)",to:"inset(0 0% 0 0)",ease:"power3.inOut",trigger:"scrollIntoView"},
+  {group:"Interaction",name:"Hover Scale",property:"scaleX",from:1,to:1.06,ease:"power2.out",trigger:"elementHover"},
+  {group:"Interaction",name:"Hover Lift",property:"y",from:0,to:-8,ease:"power2.out",trigger:"elementHover"},
+  {group:"Interaction",name:"Cursor Follow · X",property:"x",from:-30,to:30,ease:"none",trigger:"mouseMove"},
+  {group:"Interaction",name:"Floating",property:"y",from:-12,to:12,ease:"sine.inOut",trigger:"pageReady",motion:{repeat:-1,yoyo:true,duration:2}},
+  {group:"Interaction",name:"Infinite Rotation",property:"rotation",from:0,to:360,ease:"none",trigger:"pageReady",motion:{repeat:-1,duration:4}},
+  {group:"Scroll",name:"Scroll Fade",property:"opacity",from:0,to:100,ease:"none",trigger:"whileScrollingInView"},
+  {group:"Scroll",name:"Scroll Parallax",property:"y",from:80,to:-80,ease:"none",trigger:"whileScrollingInView"},
+  {group:"Scroll",name:"Scroll Zoom",property:"scaleX",from:0.8,to:1,ease:"none",trigger:"whileScrollingInView"},
+  {group:"Scroll",name:"Sticky Reveal",property:"y",from:50,to:0,ease:"power2.out",trigger:"scrollIntoView",pin:true},
+  {group:"Scroll",name:"Pinned Section Animation",property:"y",from:120,to:-120,ease:"none",trigger:"scrollProgress",pin:true},
+  {group:"Scroll",name:"Horizontal Scroll Movement",property:"x",from:260,to:-260,ease:"none",trigger:"scrollProgress",pin:true}
 ];
 
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
@@ -320,13 +332,20 @@ export default function App() {
     setActiveTrackId("");
   };
   const applyPreset=(preset:typeof PRESETS[number])=>{
-    if(!currentSequence){addSequence("scrollIntoView");return;}
-    const track=createTrack(preset.property,selectorFor(selected),currentSequence.motion.duration);
+    const sequence=currentSequence??createSequence(`Animation ${project.sequences.length+1}`,preset.trigger??"scrollIntoView");
+    const track=createTrack(preset.property,selectorForMany(selectedIds),sequence.motion.duration);
     track.label=preset.name;
     track.keyframes[0].value=preset.from;track.keyframes[1].value=preset.to;
     track.keyframes.forEach(k=>k.ease=preset.ease);
-    commit(d=>d.sequences.find(s=>s.id===currentSequence.id)?.tracks.push(track),`Preset applied: ${preset.name}`);
-    setActiveTrackId(track.id);setShowPresets(false);setTab("Animate");
+    commit(d=>{
+      let target=d.sequences.find(s=>s.id===sequence.id);
+      if(!target){target=sequence;d.sequences.push(target);}
+      target.tracks.push(track);
+      if(preset.trigger)target.trigger={...target.trigger,type:preset.trigger,target:selectorForMany(selectedIds)};
+      if(preset.pin){target.trigger.pin=true;target.trigger.pinTarget=selectorForMany(selectedIds);}
+      if(preset.motion)target.motion={...target.motion,...preset.motion};
+    },`Preset applied: ${preset.name}`);
+    setActiveSequenceId(sequence.id);setActiveTrackId(track.id);setShowPresets(false);setTab("Animate");
   };
 
   const importHtml=async(file:File)=>{
