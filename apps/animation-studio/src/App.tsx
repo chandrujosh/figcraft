@@ -86,8 +86,12 @@ export default function App() {
   useEffect(() => { selectedRef.current = selected; previewModeRef.current = previewMode; }, [selected, previewMode]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-      setDirty(false);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
+        setDirty(false);
+      } catch {
+        setStatus("Browser storage is full · Export the project JSON to keep a backup");
+      }
     }, 500);
     return () => window.clearTimeout(timer);
   }, [project]);
@@ -133,6 +137,7 @@ export default function App() {
     const inject=() => {
       const d=frame.contentDocument;
       if(!d) return;
+      let dragState:{element:HTMLElement;pointerId:number;startX:number;startY:number;baseX:number;baseY:number}|null=null;
       d.addEventListener("pointerdown",e=>{
         if(previewModeRef.current) return;
         const pointer=e as PointerEvent;
@@ -140,7 +145,28 @@ export default function App() {
         if(!target||target.closest("[data-avab-locked='true']")) return;
         const id=target.getAttribute("data-avab-id");
         if(id) window.postMessage({type:"AVAB_SELECT",id,extend:pointer.shiftKey||pointer.metaKey||pointer.ctrlKey},"*");
+        if(pointer.button!==0||!(target instanceof HTMLElement))return;
+        const computed=d.defaultView?.getComputedStyle(target);
+        const parts=(computed?.translate||"none").split(/\\s+/);
+        dragState={element:target,pointerId:pointer.pointerId,startX:pointer.clientX,startY:pointer.clientY,baseX:parts[0]==="none"?0:parseFloat(parts[0])||0,baseY:parts[1]?parseFloat(parts[1])||0:0};
+        try{target.setPointerCapture(pointer.pointerId);}catch{}
+        pointer.preventDefault();
       },true);
+      d.addEventListener("pointermove",e=>{
+        const pointer=e as PointerEvent,state=dragState;
+        if(!state||pointer.pointerId!==state.pointerId)return;
+        pointer.preventDefault();
+        const dx=pointer.clientX-state.startX,dy=pointer.clientY-state.startY;
+        state.element.style.translate=(state.baseX+dx)+"px "+(state.baseY+dy)+"px";
+      },true);
+      d.addEventListener("pointerup",e=>{
+        const pointer=e as PointerEvent;
+        if(!dragState||pointer.pointerId!==dragState.pointerId)return;
+        const moved=Math.abs(pointer.clientX-dragState.startX)+Math.abs(pointer.clientY-dragState.startY)>2;
+        dragState=null;
+        if(moved)window.postMessage({type:"AVAB_DRAG_COMMIT"},"*");
+      },true);
+      d.addEventListener("pointercancel",()=>{dragState=null;},true);
       d.addEventListener("click",e=>{
         if(previewModeRef.current) return;
         if((e.target as Element)?.closest("[data-avab-id]")) e.preventDefault();
@@ -160,6 +186,11 @@ export default function App() {
 
   useEffect(()=>{
     const onMessage=(event:MessageEvent)=>{
+      if(event.source!==iframeRef.current?.contentWindow)return;
+      if(event.data?.type==="AVAB_DRAG_COMMIT"){
+        const frame=iframeRef.current;
+        if(frame){const html=serializeFrame(frame);commit(d=>{d.html=html;},"Element repositioned on canvas");}
+      }
       if(event.data?.type==="AVAB_SELECT" && typeof event.data.id==="string") {
         const id=event.data.id as string;
         setSelected(id);
