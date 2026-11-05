@@ -37,6 +37,17 @@ function splitText(el:Element,mode:string):HTMLElement[]{
  }
  return result;
 }
+function easeValue(name:string):string|((progress:number)=>number){
+ const match=name.match(/^cubic\\(([-+0-9.e]+),\\s*([-+0-9.e]+),\\s*([-+0-9.e]+),\\s*([-+0-9.e]+)\\)$/);
+ if(!match)return name;
+ const [x1,y1,x2,y2]=match.slice(1).map(Number);
+ const bez=(t:number,a:number,b:number)=>3*(1-t)*(1-t)*t*a+3*(1-t)*t*t*b+t*t*t;
+ return (x:number)=>{
+  let low=0,high=1,t=Math.max(0,Math.min(1,x));
+  for(let i=0;i<16;i++){const value=bez(t,x1,x2);if(value<x)low=t;else high=t;t=(low+high)/2;}
+  return bez(t,y1,y2);
+ };
+}
 function styleFor(track:PropertyTrack,value:string|number):Record<string,string|number>{
  const prop=track.property;
  if(prop==="filter")return {filter:String(value)};
@@ -60,7 +71,7 @@ function easeTracks(tl:gsap.core.Timeline,doc:Document,track:PropertyTrack,defau
    const units=splitText(target,String(track.keyframes[0]?.value??"words"));
    const last=track.keyframes.at(-1);
    if(!last)continue;
-   tl.fromTo(units,{y:24,autoAlpha:0} as never,{y:0,autoAlpha:1,duration:Math.max(.05,last.at),ease:last.ease||"power3.out",stagger:stagger??{each:.035},} as never,offset);
+   tl.fromTo(units,{y:24,autoAlpha:0} as never,{y:0,autoAlpha:1,duration:Math.max(.05,last.at),ease:easeValue(last.ease||"power3.out") as never,stagger:stagger??{each:.035},} as never,offset);
   }
   return;
  }
@@ -74,7 +85,7 @@ function easeTracks(tl:gsap.core.Timeline,doc:Document,track:PropertyTrack,defau
   const from=keys[index-1],to=keys[index];
   const duration=Math.max(.001,to.at-from.at);
   const fromVars=styleFor(track,from.value);
-  const toVars={...styleFor(track,to.value),duration,ease:to.ease||"power2.out",...(stagger?{stagger}:{})};
+  const toVars={...styleFor(track,to.value),duration,ease:easeValue(to.ease||"power2.out") as never,...(stagger?{stagger}:{})};
   if(track.property==="visibility")tl.fromTo(els,{autoAlpha:Number(fromVars.autoAlpha??fromVars.visibility??0)} as never,{...toVars,autoAlpha:Number(to.value==="hidden"||to.value==="autoAlpha:0"?0:1)} as never,offset+from.at);
   else tl.fromTo(els,fromVars as never,toVars as never,offset+from.at);
  }
