@@ -1,0 +1,44 @@
+name: Build Browser Animation Studio
+
+on:
+  push:
+    branches:
+      - feature/browser-animation-studio
+    paths:
+      - apps/animation-studio/**
+      - .github/workflows/browser-animation-studio.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-animation-studio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/animation-studio/package-lock.json
+      - name: Install dependencies
+        working-directory: apps/animation-studio
+        run: npm install
+      - name: Build single-file browser app
+        working-directory: apps/animation-studio
+        run: npm run build
+      - name: Upload browser app
+        uses: actions/upload-artifact@v4
+        with:
+          name: FigCraft-Motion-Studio-Web
+          path: apps/animation-studio/dist/
+          if-no-files-found: error
+          retention-days: 14
