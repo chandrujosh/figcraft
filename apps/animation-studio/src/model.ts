@@ -236,6 +236,7 @@ export function createTrack(property: AnimProperty, target: string, duration = 1
     lineHeight: [0.9, 1.15], wordSpacing: [8, 0], width: [0, 100], height: [0, 100],
     padding: [0, 24], margin: [0, 20], clipPath: ["inset(0 0 100% 0)", "inset(0 0 0% 0)"],
     boxShadow: ["0 0 0 rgba(0,0,0,0)", "0 24px 80px rgba(0,0,0,.3)"],
+    textReveal: ["words", "words"],
     visibility: ["hidden", "visible"], filter: ["blur(12px) saturate(.4)", "blur(0px) saturate(1)"]
   };
   const [from, to] = defaults[property] ?? [0, 100];
