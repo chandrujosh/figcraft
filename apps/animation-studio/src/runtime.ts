@@ -61,6 +61,17 @@ function splitText(el:Element,mode:string):HTMLElement[]{
  return lines;
 }
 
+function easeValue(name:string):string|((progress:number)=>number){
+ const match=name.match(/^cubic\(([-+0-9.e]+),\s*([-+0-9.e]+),\s*([-+0-9.e]+),\s*([-+0-9.e]+)\)$/);
+ if(!match)return name;
+ const [x1,y1,x2,y2]=match.slice(1).map(Number);
+ const bez=(t:number,a:number,b:number)=>3*(1-t)*(1-t)*t*a+3*(1-t)*t*t*b+t*t*t;
+ return (x:number)=>{
+  let low=0,high=1,t=Math.max(0,Math.min(1,x));
+  for(let i=0;i<16;i++){if(bez(t,x1,x2)<x)low=t;else high=t;t=(low+high)/2;}
+  return bez(t,y1,y2);
+ };
+}
 function styleFor(track:PropertyTrack,value:string|number):Record<string,string|number>{
  const prop=track.property;
  if(prop==="filter")return {filter:String(value)};
