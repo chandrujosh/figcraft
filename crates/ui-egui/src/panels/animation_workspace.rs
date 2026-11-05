@@ -125,9 +125,10 @@ fn layers_panel(ui: &mut Ui, doc: &Document, selected: &Node) {
             let prefix = "  ".repeat(depth.min(5));
             let label = format!("{prefix}{}", layer.name);
             let active = id == selected.id;
-            let response = ui.selectable_label(active, label);
             if active {
-                response.on_hover_text(tr("Currently selected on the canvas"));
+                ui.label(egui::RichText::new(label).strong().color(Tokens::get(ui.ctx()).accent));
+            } else {
+                ui.label(label);
             }
             if !layer.scroll_animations.is_empty() {
                 ui.label(egui::RichText::new(format!("{} · {} {}", layer.scroll_animations.len(), tr("animation(s)"), if active { tr("selected") } else { "" })).small().color(Tokens::get(ui.ctx()).text_secondary));
@@ -302,72 +303,78 @@ fn inspector_panel(
 
     viewport_preview(ui, animation);
     ui.separator();
-    let Some(step) = animation.steps.get_mut(*step_index) else {
-        ui.label(tr("Select a timeline action to edit it."));
-        return;
-    };
-    ui.strong(format!("{} · {}", tr("Action"), step.property.label()));
-    let page = doc.page_of(node.id).unwrap_or(node.id);
-    ui.label(tr("Action target"));
-    let target_name = step.target.and_then(|id| doc.node(id)).map(|n| n.name.clone()).unwrap_or_else(|| tr("Trigger element").into());
-    egui::ComboBox::from_id_salt(("avab-target", node.id.0, animation_index, *step_index))
-        .width(ui.available_width())
-        .selected_text(target_name)
-        .show_ui(ui, |ui| {
-            ui.selectable_value(&mut step.target, None, tr("Trigger element"));
-            for id in doc.subtree(page).into_iter().filter(|id| *id != page) {
-                let Some(candidate) = doc.node(id) else { continue };
-                ui.selectable_value(&mut step.target, Some(id), candidate.name.clone());
-            }
-        });
-
-    egui::ComboBox::from_id_salt(("avab-property", node.id.0, animation_index, *step_index))
-        .width(ui.available_width())
-        .selected_text(step.property.label())
-        .show_ui(ui, |ui| {
-            for property in AnimationProperty::ALL {
-                ui.selectable_value(&mut step.property, property, property.label());
-            }
-        });
-    let (low, high) = property_range(step.property);
-    ui.horizontal(|ui| {
-        ui.label(tr("From"));
-        ui.add(egui::DragValue::new(&mut step.from).range(low..=high).speed(0.1));
-    });
-    ui.horizontal(|ui| {
-        ui.label(tr("To"));
-        ui.add(egui::DragValue::new(&mut step.to).range(low..=high).speed(0.1));
-    });
-    ui.add(egui::Slider::new(&mut step.start, 0.0..=0.999).text(tr("Track start")));
-    ui.add(egui::Slider::new(&mut step.end, (step.start + 0.001)..=1.0).text(tr("Track end")));
-    ui.label(tr("Easing"));
-    egui::ComboBox::from_id_salt(("avab-easing", node.id.0, animation_index, *step_index))
-        .width(ui.available_width())
-        .selected_text(step.easing.label())
-        .show_ui(ui, |ui| {
-            for easing in Easing::ALL {
-                ui.selectable_value(&mut step.easing, easing, easing.label());
-            }
-            if ui.button(tr("Custom bezier…")).clicked() {
-                step.easing = Easing::CUSTOM_BEZIER;
-                ui.close();
-            }
-        });
-    if let Easing::CustomBezier { x1, y1, x2, y2 } = step.easing {
-        let mut points = [x1, y1, x2, y2];
-        ui.label(tr("Cubic bezier control points"));
-        for (index, value) in points.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
-                ui.label(["X1", "Y1", "X2", "Y2"][index]);
-                ui.add(egui::DragValue::new(value).speed(0.01).range(if index % 2 == 0 { 0.0..=1.0 } else { -2.0..=2.0 }));
+    let mut remove_action = false;
+    {
+        let Some(step) = animation.steps.get_mut(*step_index) else {
+            ui.label(tr("Select a timeline action to edit it."));
+            return;
+        };
+        ui.strong(format!("{} · {}", tr("Action"), step.property.label()));
+        let page = doc.page_of(node.id).unwrap_or(node.id);
+        ui.label(tr("Action target"));
+        let target_name = step.target.and_then(|id| doc.node(id)).map(|n| n.name.clone()).unwrap_or_else(|| tr("Trigger element").into());
+        egui::ComboBox::from_id_salt(("avab-target", node.id.0, animation_index, *step_index))
+            .width(ui.available_width())
+            .selected_text(target_name)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut step.target, None, tr("Trigger element"));
+                for id in doc.subtree(page).into_iter().filter(|id| *id != page) {
+                    let Some(candidate) = doc.node(id) else { continue };
+                    ui.selectable_value(&mut step.target, Some(id), candidate.name.clone());
+                }
             });
+
+        egui::ComboBox::from_id_salt(("avab-property", node.id.0, animation_index, *step_index))
+            .width(ui.available_width())
+            .selected_text(step.property.label())
+            .show_ui(ui, |ui| {
+                for property in AnimationProperty::ALL {
+                    ui.selectable_value(&mut step.property, property, property.label());
+                }
+            });
+        let (low, high) = property_range(step.property);
+        ui.horizontal(|ui| {
+            ui.label(tr("From"));
+            ui.add(egui::DragValue::new(&mut step.from).range(low..=high).speed(0.1));
+        });
+        ui.horizontal(|ui| {
+            ui.label(tr("To"));
+            ui.add(egui::DragValue::new(&mut step.to).range(low..=high).speed(0.1));
+        });
+        ui.add(egui::Slider::new(&mut step.start, 0.0..=0.999).text(tr("Track start")));
+        ui.add(egui::Slider::new(&mut step.end, (step.start + 0.001)..=1.0).text(tr("Track end")));
+        ui.label(tr("Easing"));
+        egui::ComboBox::from_id_salt(("avab-easing", node.id.0, animation_index, *step_index))
+            .width(ui.available_width())
+            .selected_text(step.easing.label())
+            .show_ui(ui, |ui| {
+                for easing in Easing::ALL {
+                    ui.selectable_value(&mut step.easing, easing, easing.label());
+                }
+                if ui.button(tr("Custom bezier…")).clicked() {
+                    step.easing = Easing::CUSTOM_BEZIER;
+                    ui.close();
+                }
+            });
+        if let Easing::CustomBezier { x1, y1, x2, y2 } = step.easing {
+            let mut points = [x1, y1, x2, y2];
+            ui.label(tr("Cubic bezier control points"));
+            for (index, value) in points.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(["X1", "Y1", "X2", "Y2"][index]);
+                    ui.add(egui::DragValue::new(value).speed(0.01).range(if index % 2 == 0 { 0.0..=1.0 } else { -2.0..=2.0 }));
+                });
+            }
+            step.easing = Easing::CustomBezier { x1: points[0], y1: points[1], x2: points[2], y2: points[3] };
+            bezier_preview(ui, step.easing);
         }
-        step.easing = Easing::CustomBezier { x1: points[0], y1: points[1], x2: points[2], y2: points[3] };
-        bezier_preview(ui, step.easing);
+        remove_action = ui.button(tr("Remove action")).clicked();
     }
-    if ui.button(tr("Remove action")).clicked() {
-        animation.steps.remove(*step_index);
-        *step_index = step_index.saturating_sub(1);
+    if remove_action {
+        if *step_index < animation.steps.len() {
+            animation.steps.remove(*step_index);
+        }
+        *step_index = (*step_index).min(animation.steps.len().saturating_sub(1));
     }
 }
 
