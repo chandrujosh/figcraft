@@ -4,10 +4,11 @@ on:
     branches:
       - feature/native-scroll-animation
     paths:
-      - patches/figcraft-complete-feature.patch.gz.b64
+      - patches/figcraft-complete-feature.patch.part*
       - .github/workflows/apply-figcraft-patch.yml
 permissions:
   contents: write
+  actions: write
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -16,26 +17,34 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-      - name: Apply prepared source patch
+      - name: Reassemble and apply source patch
         shell: bash
         run: |
           set -euo pipefail
-          bundle="patches/figcraft-complete-feature.patch.gz.b64"
-          if [[ ! -f "$bundle" ]]; then
-            echo "Patch bundle already applied; nothing to do."
-            exit 0
+          shopt -s nullglob
+          parts=(patches/figcraft-complete-feature.patch.part*)
+          if (( ${#parts[@]} != 11 )); then
+            echo "Expected 11 patch chunks; found ${#parts[@]}"
+            exit 1
           fi
-          python3 - "$bundle" <<'PY'
-          import base64, gzip, pathlib, sys
-          encoded = pathlib.Path(sys.argv[1]).read_text(encoding="ascii").strip()
+          cat "${parts[@]}" > /tmp/figcraft-complete-feature.patch.gz.b64
+          python3 - <<'PY'
+          import base64, gzip, pathlib
+          encoded = pathlib.Path('/tmp/figcraft-complete-feature.patch.gz.b64').read_text(encoding='ascii').strip()
           patch = gzip.decompress(base64.b64decode(encoded, validate=True))
-          pathlib.Path("/tmp/figcraft-native-scroll.patch").write_bytes(patch)
+          pathlib.Path('/tmp/figcraft-native-scroll.patch').write_bytes(patch)
+          print(f"Decoded and verified patch: {len(patch)} bytes")
           PY
           git apply --check /tmp/figcraft-native-scroll.patch
           git apply /tmp/figcraft-native-scroll.patch
-          rm "$bundle"
+          rm -- "${parts[@]}"
+          rm -f patches/figcraft-complete-feature.patch.gz.b64
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Add native scroll animation builder and Windows setup installer"
           git push origin "HEAD:${GITHUB_REF_NAME}"
+      - name: Start Windows installer build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run windows-setup-exe.yml --ref "${GITHUB_REF_NAME}"
