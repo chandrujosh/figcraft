@@ -32,6 +32,7 @@ export interface PropertyTrack {
   id: string;
   label: string;
   target: string;
+  startTime: number;
   property: AnimProperty;
   enabled: boolean;
   keyframes: Keyframe[];
@@ -240,7 +241,7 @@ export function createTrack(property: AnimProperty, target: string, duration = 1
   const unit = PROPERTY_META[property].unit;
   const format = (v: number | string) => typeof v === "number" && unit && unit !== "%" && unit !== "×" && unit !== "°" ? `${v}${unit}` : v;
   return {
-    id: makeId("track"), label: PROPERTY_META[property].label, target, property, enabled: true,
+    id: makeId("track"), label: PROPERTY_META[property].label, target, startTime: 0, property, enabled: true,
     keyframes: [
       { id: makeId("kf"), at: 0, value: format(from), ease: "power2.out" },
       { id: makeId("kf"), at: duration, value: format(to), ease: "power2.out" }
