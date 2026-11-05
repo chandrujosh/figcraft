@@ -244,6 +244,7 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
         ui.add_space(80.0);
         a11y::scroll_focus(&mut app.ui.nav, ui);
     });
+    crate::panels::animation_workspace::show(app, ui.ctx());
 }
 
 fn design(app: &mut FigApp, ui: &mut Ui) {
