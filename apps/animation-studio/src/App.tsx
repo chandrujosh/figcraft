@@ -626,7 +626,7 @@ load(GSAP).then(function(){return load(SCROLL);}).then(function(){return fetch("
         <section className="timeline-panel">
           <div className="timeline-head"><div><b>TIMELINE</b><span>{currentSequence?.name??"No animation selected"}</span></div><div className="timeline-controls">
             <button onClick={()=>{setPlayhead(0);controllerRef.current?.seek(currentSequence?.id??"",0);}}>↤</button>
-            <button className="play-icon" onClick={()=>{if(!currentSequence)return;setPlayhead(0);controllerRef.current?.play(currentSequence.id);setPlaying(true);}}>{playing?"↻":"▶"}</button>
+            <button className="play-icon" onClick={()=>{if(!currentSequence)return;controllerRef.current?.playFrom(currentSequence.id,playhead);setPlaying(true);}} title="Play from playhead">{playing?"↻":"▶"}</button>
             <button onClick={()=>{controllerRef.current?.pause(currentSequence?.id??"");setPlaying(false);}}>Ⅱ</button>
             <span className="timecode">{playhead.toFixed(2)}s / {duration.toFixed(2)}s</span>
             <button onClick={()=>setZoom(z=>Math.min(2.5,z*1.2))}>＋</button><button onClick={()=>setZoom(z=>Math.max(.4,z/1.2))}>－</button>
