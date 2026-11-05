@@ -164,14 +164,15 @@ export default function App() {
         overlay.style.display="block";overlay.style.left=rect.left+"px";overlay.style.top=rect.top+"px";
         overlay.style.width=rect.width+"px";overlay.style.height=rect.height+"px";
       };
-      (frame.contentWindow as (Window & {__avabUpdateOverlay?:()=>void})|null)?.setTimeout(()=>{
+      const iframeWindow=frame.contentWindow as (Window & {__avabUpdateOverlay?:()=>void})|null;
+      iframeWindow?.setTimeout(()=>{
         const overlay=d.createElement("div");overlay.id="avab-selection-overlay";
         overlay.innerHTML=["nw","n","ne","e","se","s","sw","w"].map(handle=>'<i data-avab-resize="'+handle+'"></i>').join("");
         d.body.appendChild(overlay);
-        (frame.contentWindow as (Window & {__avabUpdateOverlay?:()=>void})|null).__avabUpdateOverlay=updateSelectionOverlay;
+        if(iframeWindow)iframeWindow.__avabUpdateOverlay=updateSelectionOverlay;
         updateSelectionOverlay();
         d.addEventListener("scroll",updateSelectionOverlay,true);
-        frame.contentWindow?.addEventListener("resize",updateSelectionOverlay);
+        iframeWindow?.addEventListener("resize",updateSelectionOverlay);
       },0);
       d.addEventListener("pointerdown",e=>{
         if(previewModeRef.current) return;
