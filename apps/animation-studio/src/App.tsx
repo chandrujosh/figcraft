@@ -62,6 +62,7 @@ export default function App() {
   const [htmlDraft, setHtmlDraft] = useState("");
   const [showPresets, setShowPresets] = useState(false);
   const [renaming, setRenaming] = useState("");
+  const [dragLayer, setDragLayer] = useState("");
   const [status, setStatus] = useState("Ready");
   const [undoStack, setUndoStack] = useState<StudioProject[]>([]);
   const [redoStack, setRedoStack] = useState<StudioProject[]>([]);
@@ -110,7 +111,7 @@ export default function App() {
         const id = el.getAttribute("data-avab-id") || makeId("layer");
         el.setAttribute("data-avab-id", id);
         const text = el.getAttribute("data-avab-name") || el.textContent?.trim().replace(/\s+/g," ").slice(0,35) || el.tagName.toLowerCase();
-        next.push({id,name:text,tag:el.tagName.toLowerCase(),depth,parent:parent.getAttribute("data-avab-id") || "body",className:typeof el.className==="string"?el.className:""});
+        next.push({id,name:text,tag:el.tagName.toLowerCase(),depth,parent:parent.getAttribute("data-avab-id") || "body",className:typeof el.className==="string"?el.className:"",isGroup:el.getAttribute("data-avab-group")==="true"});
         walk(el, depth+1);
       });
     };
@@ -311,7 +312,8 @@ export default function App() {
     const el=iframeRef.current?.contentDocument?.querySelector(selectorFor(id)) as HTMLElement|null;
     if(!el)return;
     if(kind==="hidden")el.style.display=el.style.display==="none"?"":"none";
-    else el.style.pointerEvents=el.style.pointerEvents==="none"?"":"none";
+    else if(el.getAttribute("data-avab-locked")==="true")el.removeAttribute("data-avab-locked");
+    else el.setAttribute("data-avab-locked","true");
     const html=serializeFrame(iframeRef.current!);
     commit(d=>{d.html=html;},kind==="hidden"?"Layer visibility changed":"Layer lock toggled");
   };
@@ -337,10 +339,28 @@ export default function App() {
     const el=iframeRef.current?.contentDocument?.querySelector(selectorFor(id));
     if(!el?.parentElement)return;
     const wrapper=iframeRef.current!.contentDocument!.createElement("div");
-    wrapper.setAttribute("data-avab-id",makeId("group"));wrapper.setAttribute("data-avab-name","Group");
+    wrapper.setAttribute("data-avab-id",makeId("group"));wrapper.setAttribute("data-avab-name","Group");wrapper.setAttribute("data-avab-group","true");
     el.parentElement.insertBefore(wrapper,el);wrapper.appendChild(el);
     const html=serializeFrame(iframeRef.current!);
     commit(d=>{d.html=html;},"Layer grouped");refreshLayers();
+  };
+  const ungroupLayer=(id:string)=>{
+    const el=iframeRef.current?.contentDocument?.querySelector(selectorFor(id));
+    if(!el?.parentElement||el.getAttribute("data-avab-group")!=="true")return;
+    const parent=el.parentElement;
+    [...el.children].forEach(child=>parent.insertBefore(child,el));
+    el.remove();
+    const html=serializeFrame(iframeRef.current!);
+    commit(d=>{d.html=html;},"Layer ungrouped");refreshLayers();
+  };
+  const moveLayerBefore=(fromId:string,toId:string)=>{
+    if(!fromId||fromId===toId)return;
+    const doc=iframeRef.current?.contentDocument;
+    const from=doc?.querySelector(selectorFor(fromId)),to=doc?.querySelector(selectorFor(toId));
+    if(!from||!to||!from.parentElement||from.parentElement!==to.parentElement)return;
+    from.parentElement.insertBefore(from,to);
+    const html=serializeFrame(iframeRef.current!);
+    commit(d=>{d.html=html;},"Layer order changed");refreshLayers();
   };
   const scrub=(value:number)=>{
     setPlayhead(value);
@@ -397,11 +417,11 @@ export default function App() {
         <div className="panel-tabs"><b>Structure</b><button onClick={refreshLayers}>⟳</button></div>
         <div className="panel-section-title"><span>LAYERS</span><span>{layers.length} elements</span></div>
         <div className="layers-list">
-          {layers.map(layer=><div key={layer.id} className={"layer-row "+(selectedIds.includes(layer.id)?"selected":"")} style={{paddingLeft:10+layer.depth*12}} onClick={e=>{setSelected(layer.id);setSelectedIds(current=>e.shiftKey?(current.includes(layer.id)?current.filter(x=>x!==layer.id):[...current,layer.id]):[layer.id]);}}>
+          {layers.map(layer=><div key={layer.id} draggable onDragStart={()=>setDragLayer(layer.id)} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();moveLayerBefore(dragLayer,layer.id);setDragLayer("");}} className={"layer-row "+(selectedIds.includes(layer.id)?"selected":"")} style={{paddingLeft:10+layer.depth*12}} onClick={e=>{setSelected(layer.id);setSelectedIds(current=>e.shiftKey?(current.includes(layer.id)?current.filter(x=>x!==layer.id):[...current,layer.id]):[layer.id]);}}>
             <span className="layer-type">{layer.tag==="img"?"▧":layer.tag==="svg"?"◇":layer.tag.startsWith("h")?"T":layer.tag==="button"?"▱":"▣"}</span>
             {renaming===layer.id?<input autoFocus value={layer.name} onChange={e=>setLayers(old=>old.map(x=>x.id===layer.id?{...x,name:e.target.value}:x))} onBlur={e=>{renameLayer(layer.id,e.currentTarget.value);setRenaming("");}} onKeyDown={e=>{if(e.key==="Enter"){renameLayer(layer.id,layer.name);setRenaming("");}}}/>:<span className="layer-name" onDoubleClick={e=>{e.stopPropagation();setRenaming(layer.id);}}>{layer.name}</span>}
             <button title="Hide/show" onClick={e=>{e.stopPropagation();toggleLayer(layer.id,"hidden");}}>◉</button><button title="Lock/unlock" onClick={e=>{e.stopPropagation();toggleLayer(layer.id,"locked");}}>⌑</button>
-            {selected===layer.id&&<div className="layer-more"><button title="Move up" onClick={e=>{e.stopPropagation();moveLayer(layer.id,-1);}}>↑</button><button title="Move down" onClick={e=>{e.stopPropagation();moveLayer(layer.id,1);}}>↓</button><button title="Duplicate" onClick={e=>{e.stopPropagation();duplicateLayer(layer.id);}}>⧉</button><button title="Group" onClick={e=>{e.stopPropagation();groupLayer(layer.id);}}>⊞</button></div>}
+            {selected===layer.id&&<div className="layer-more"><button title="Move up" onClick={e=>{e.stopPropagation();moveLayer(layer.id,-1);}}>↑</button><button title="Move down" onClick={e=>{e.stopPropagation();moveLayer(layer.id,1);}}>↓</button><button title="Duplicate" onClick={e=>{e.stopPropagation();duplicateLayer(layer.id);}}>⧉</button><button title="Group" onClick={e=>{e.stopPropagation();groupLayer(layer.id);}}>⊞</button>{layer.isGroup&&<button title="Ungroup" onClick={e=>{e.stopPropagation();ungroupLayer(layer.id);}}>⊟</button>}</div>}
           </div>)}
         </div>
         <div className="left-footer"><div className="panel-section-title"><span>ANIMATION SEQUENCES</span><button onClick={()=>addSequence()}>＋</button></div>
