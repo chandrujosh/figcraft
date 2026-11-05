@@ -96,6 +96,7 @@ export interface LayerItem {
   depth: number;
   parent: string;
   className: string;
+  isGroup?: boolean;
 }
 
 export const PROPERTY_GROUPS: { label: string; properties: AnimProperty[] }[] = [
