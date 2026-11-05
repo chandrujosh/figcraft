@@ -106,7 +106,7 @@ export default function App() {
     };
     walk(root,0);
     setLayers(next);
-    setSelectedLayer(next.find(l=>l.id===selected) ?? null);
+    setSelectedLayer(next.find(l=>l.id===selectedRef.current) ?? null);
   }, []);
 
   const refreshPreview = useCallback(() => {
@@ -132,7 +132,7 @@ export default function App() {
         if(id) window.postMessage({type:"AVAB_SELECT",id},"*");
       },true);
       d.addEventListener("click",e=>{
-        if(previewMode) return;
+        if(previewModeRef.current) return;
         if((e.target as Element)?.closest("[data-avab-id]")) e.preventDefault();
       },true);
       const style=d.createElement("style");
@@ -143,7 +143,7 @@ export default function App() {
       el?.setAttribute("data-avab-selected","true");
       refreshLayers();
     };
-    win?.setTimeout(inject, 0);
+    frame.contentWindow?.setTimeout(inject, 0);
   }, []);
 
   useEffect(()=>{ refreshPreview(); },[project.html,refreshPreview]);
