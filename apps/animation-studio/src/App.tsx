@@ -50,6 +50,7 @@ function serializeFrame(frame: HTMLIFrameElement): string {
   if(!source)return "";
   const root=source.documentElement.cloneNode(true) as HTMLElement;
   root.querySelector("#avab-editor-style")?.remove();
+  root.querySelector("#avab-selection-overlay")?.remove();
   root.querySelectorAll("[data-avab-selected]").forEach(el=>el.removeAttribute("data-avab-selected"));
   return "<!doctype html>\\n"+root.outerHTML;
 }
