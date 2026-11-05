@@ -1,4 +1,4 @@
-import { gsap } from "gsap";
+import { gsap, type TweenVars } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import type { AnimationSequence, AnimProperty, Breakpoint, PropertyTrack, StudioProject, TriggerType } from "./model";
 
@@ -37,7 +37,7 @@ function splitText(el:Element,mode:string):HTMLElement[]{
  }
  return result;
 }
-function styleFor(track:PropertyTrack,value:string|number):Record<string,string|number>{
+function styleFor(track:PropertyTrack,value:string|number):TweenVars{
  const prop=track.property;
  if(prop==="filter")return {filter:String(value)};
  if(["blur","brightness","saturation","grayscale","contrast"].includes(prop)){
@@ -49,7 +49,7 @@ function styleFor(track:PropertyTrack,value:string|number):Record<string,string|
  }
  const mapped=propMap[prop];
  if(!mapped)return {};
- return {[mapped]:cssValue(prop,value)};
+ return {[mapped]:cssValue(prop,value)} as TweenVars;
 }
 function easeTracks(tl:gsap.core.Timeline,doc:Document,track:PropertyTrack,defaultTarget:string,offset:number,stagger:{each:number;from:string}|undefined,warnings:string[]){
  if(!track.enabled||!track.keyframes.length)return;
@@ -148,6 +148,7 @@ export function mountAnimations(project:StudioProject,doc:Document,win:Window,ho
  const configure=()=>{
   if(dead)return;
   warnings=[];
+  const warn=(message:string)=>warnings.push(message);
   const breakpoint=breakpointFor(win);
   snapshotTargets();
   for(const seq of project.sequences){
@@ -179,7 +180,7 @@ export function mountAnimations(project:StudioProject,doc:Document,win:Window,ho
      toggleActions:trigger.toggleActions||"play none none reverse",
      once:trigger.once,
      markers:trigger.markers,
-     snap:trigger.snap>0?{snapTo:1/trigger.snap,duration:.25,delay:.1,ease:"power1.inOut"}:false,
+     ...(trigger.snap>0?{snap:{snapTo:1/trigger.snap,duration:.25,delay:.1,ease:"power1.inOut"}}:{}),
      onUpdate:self=>{
       if(trigger.type==="scrollDown"&&self.direction>0)tl.play();
       if(trigger.type==="scrollUp"&&self.direction<0)tl.play();
@@ -188,9 +189,9 @@ export function mountAnimations(project:StudioProject,doc:Document,win:Window,ho
     });
     cleanup.push(()=>st?.kill());
    }else if(trigger.type==="elementVisible"){
-    const IO=win.IntersectionObserver;
+    const IO=(win as Window & {IntersectionObserver?:typeof IntersectionObserver}).IntersectionObserver;
     if(IO){
-     const io=new IO(entries=>{if(entries.some(e=>e.isIntersecting)){tl.restart();if(trigger.once)io.disconnect();}},{threshold:Math.max(0,Math.min(1,trigger.threshold/1000))});
+     const io=new IO((entries:IntersectionObserverEntry[])=>{if(entries.some((e:IntersectionObserverEntry)=>e.isIntersecting)){tl.restart();if(trigger.once)io.disconnect();}},{threshold:Math.max(0,Math.min(1,trigger.threshold/1000))});
      io.observe(triggerTarget);cleanup.push(()=>io.disconnect());
     }else warn("IntersectionObserver is unavailable in this preview browser.");
    }else{
