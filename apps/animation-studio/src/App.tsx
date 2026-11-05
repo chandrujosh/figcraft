@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import type { AnimationSequence, AnimProperty, Breakpoint, Keyframe, LayerItem, PropertyTrack, StudioProject, TriggerType } from "./model";
 import { createSequence, createTrack, EASINGS, makeId, makeSampleHtml, prepareHtml, PROPERTY_GROUPS, PROPERTY_META, TRIGGER_GROUPS } from "./model";
 import { mountAnimations, type AnimationController } from "./runtime";
+import { importWebsiteZip } from "./importZip";
 
 type Tab = "Trigger" | "Animate" | "Timeline" | "Motion" | "Advanced";
 const STORAGE_KEY = "figcraft-motion-studio-v1";
@@ -299,14 +300,9 @@ export default function App() {
 
   const importHtml=async(file:File)=>{
     try{
-      let content="";
-      if(file.name.toLowerCase().endsWith(".zip")){
-        const zip=await JSZip.loadAsync(file);
-        const entry=Object.values(zip.files).find(f=>!f.dir&&/\.html?$/i.test(f.name));
-        if(!entry)throw new Error("ZIP contains no HTML entry file");
-        content=await entry.async("string");
-      }else content=await file.text();
-      const html=prepareHtml(content);
+      const html=file.name.toLowerCase().endsWith(".zip")
+        ? await importWebsiteZip(file)
+        : prepareHtml(await file.text());
       commit(d=>{d.html=html;d.name=file.name.replace(/\.(html?|zip)$/i,"");d.sequences=[];},"Website imported");
       setTimeout(refreshPreview,80);
       setStatus("Website imported · Select an element to animate");
