@@ -203,7 +203,7 @@ export const EASINGS = [
   "power3.in", "power3.out", "power3.inOut", "power4.in", "power4.out", "power4.inOut",
   "back.in(1.7)", "back.out(1.7)", "back.inOut(1.7)", "bounce.in", "bounce.out", "bounce.inOut",
   "elastic.in(1,0.3)", "elastic.out(1,0.3)", "circ.in", "circ.out", "circ.inOut", "expo.in", "expo.out",
-  "expo.inOut", "sine.in", "sine.out", "sine.inOut"
+  "expo.inOut", "sine.in", "sine.out", "sine.inOut", "custom-bezier"
 ];
 
 export const makeId = (prefix = "id") => `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
