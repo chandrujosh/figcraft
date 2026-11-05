@@ -4,7 +4,7 @@ import type { AnimationSequence, AnimProperty, Breakpoint, PropertyTrack, Studio
 
 gsap.registerPlugin(ScrollTrigger);
 type Hooks={onSequenceStart?:(id:string)=>void;onSequenceComplete?:(id:string)=>void;onWarning?:(warnings:string[])=>void};
-export interface AnimationController { play:(id:string)=>void; pause:(id:string)=>void; seek:(id:string,time:number)=>void; refresh:()=>void; destroy:()=>void; warnings:string[] }
+export interface AnimationController { play:(id:string)=>void; playFrom:(id:string,time:number)=>void; pause:(id:string)=>void; seek:(id:string,time:number)=>void; refresh:()=>void; destroy:()=>void; warnings:string[] }
 type RuntimeItem={timeline:gsap.core.Timeline;trigger?:ScrollTrigger;cleanup:(()=>void)[];sequence:AnimationSequence};
 
 const propMap:Partial<Record<AnimProperty,string>>={x:"x",y:"y",z:"z",scaleX:"scaleX",scaleY:"scaleY",rotationX:"rotationX",rotationY:"rotationY",rotation:"rotation",skewX:"skewX",skewY:"skewY",transformOrigin:"transformOrigin",perspective:"perspective",top:"top",right:"right",bottom:"bottom",left:"left",opacity:"opacity",visibility:"autoAlpha",backgroundColor:"backgroundColor",color:"color",borderColor:"borderColor",borderRadius:"borderRadius",borderWidth:"borderWidth",boxShadow:"boxShadow",blur:"filter",brightness:"filter",saturation:"filter",grayscale:"filter",contrast:"filter",fontSize:"fontSize",fontWeight:"fontWeight",letterSpacing:"letterSpacing",lineHeight:"lineHeight",wordSpacing:"wordSpacing",clipPath:"clipPath",width:"width",height:"height",padding:"padding",margin:"margin",strokeDashoffset:"strokeDashoffset",strokeDasharray:"strokeDasharray"};
@@ -133,7 +133,7 @@ function getStart(seq:AnimationSequence):string{
 function makeTimeline(seq:AnimationSequence,doc:Document,win:Window,hooks:Hooks,warnings:string[],breakpoint:Breakpoint):gsap.core.Timeline|null{
  const motion=seq.motion;
  if(motion.respectReducedMotion&&win.matchMedia("(prefers-reduced-motion: reduce)").matches)return null;
- const tl=gsap.timeline({paused:true,repeat:motion.repeat,repeatDelay:motion.repeatDelay,yoyo:motion.yoyo,timeScale:Math.max(.05,motion.speed),onStart:()=>{hooks.onSequenceStart?.(seq.id);win.dispatchEvent(new CustomEvent("avab:animation-start",{detail:{id:seq.id}}));},onComplete:()=>{hooks.onSequenceComplete?.(seq.id);win.dispatchEvent(new CustomEvent("avab:animation-complete",{detail:{id:seq.id}}));}});
+ const tl=gsap.timeline({paused:true,repeat:motion.repeat,repeatDelay:motion.repeatDelay,yoyo:motion.yoyo||motion.direction==="alternate"||motion.direction==="alternate-reverse",timeScale:Math.max(.05,motion.speed),onStart:()=>{hooks.onSequenceStart?.(seq.id);win.dispatchEvent(new CustomEvent("avab:animation-start",{detail:{id:seq.id}}));},onComplete:()=>{hooks.onSequenceComplete?.(seq.id);win.dispatchEvent(new CustomEvent("avab:animation-complete",{detail:{id:seq.id}}));}});
  seq.tracks.forEach((track,index)=>{
   const override=track.overrides?.[breakpoint];
   if(override?.enabled===false)return;
@@ -295,6 +295,7 @@ export function mountAnimations(project:StudioProject,doc:Document,win:Window,ho
  return {
   warnings,
   play:id=>items.find(x=>x.sequence.id===id)?.timeline.restart(),
+  playFrom:(id,time)=>items.find(x=>x.sequence.id===id)?.timeline.play(Math.max(0,time)),
   pause:id=>items.find(x=>x.sequence.id===id)?.timeline.pause(),
   seek:(id,time)=>{
    const item=items.find(x=>x.sequence.id===id);
