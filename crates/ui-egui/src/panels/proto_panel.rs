@@ -321,6 +321,11 @@ pub fn prototype(app: &mut FigApp, ui: &mut Ui) {
     {
         open_editor(ui.ctx(), None);
     }
+    ui.horizontal(|ui| {
+        if ui.button(tr("Open visual animation workspace")).clicked() {
+            crate::panels::animation_workspace::open(ui.ctx());
+        }
+    });
     // Flow starting point (top-level frames).
     if doc.top_level_frame(first) == Some(first) {
         flow_section(app, ui, &doc, page, first);
