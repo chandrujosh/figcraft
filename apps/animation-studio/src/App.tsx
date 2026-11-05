@@ -646,7 +646,42 @@ function AnimateInspector({addTrack,track,updateTrack,removeTrack,addKeyframe,sa
 }
 function TimelineInspector({sequence,track,updateKeyframe,playhead}:{sequence?:AnimationSequence;track?:PropertyTrack;updateKeyframe:(trackId:string,keyId:string,patch:Partial<Keyframe>)=>void;playhead:number}){
  if(!sequence||!track)return <div className="empty-inspector"><p>Select an animation track to edit its keyframes.</p></div>;
- return <><Section title="Keyframe editor"><p className="helper">Selected track: {track.label}</p>{track.keyframes.map((k,i)=><div className="keyframe-card" key={k.id}><div className="keyframe-card-head"><b>KEYFRAME {i+1}</b><small>{k.id}</small></div><Field label="Timeline position" value={k.at} unit="s" type="number" step={.01} onChange={v=>updateKeyframe(track.id,k.id,{at:Number(v)})}/><Field label="Value" value={k.value} onChange={v=>updateKeyframe(track.id,k.id,{value:typeof v==="boolean"?String(v):v})}/><Field label="Easing" value={k.ease} type="select" options={EASINGS} onChange={v=>updateKeyframe(track.id,k.id,{ease:String(v)})}/></div>)}<div className="helper">Current playhead: {playhead.toFixed(2)}s. Keyframe timing is saved to the project.</div></Section></>;
+ return <><Section title="Keyframe editor"><p className="helper">Selected track: {track.label}</p>{track.keyframes.map((k,i)=><div className="keyframe-card" key={k.id}><div className="keyframe-card-head"><b>KEYFRAME {i+1}</b><small>{k.id}</small></div><Field label="Timeline position" value={k.at} unit="s" type="number" step={.01} onChange={v=>updateKeyframe(track.id,k.id,{at:Number(v)})}/><Field label="Value" value={k.value} onChange={v=>updateKeyframe(track.id,k.id,{value:typeof v==="boolean"?String(v):v})}/><Field label="Easing" value={k.ease.startsWith("cubic(")?"custom-bezier":k.ease} type="select" options={EASINGS} onChange={v=>updateKeyframe(track.id,k.id,{ease:v==="custom-bezier"?"cubic(0.25,0.1,0.25,1)":String(v)})}/>{k.ease.startsWith("cubic(")&&<BezierEditor value={k.ease} onChange={value=>updateKeyframe(track.id,k.id,{ease:value})}/ >}</div>)}<div className="helper">Current playhead: {playhead.toFixed(2)}s. Keyframe timing is saved to the project.</div></Section></>;
+}
+function BezierEditor({value,onChange}:{value:string;onChange:(value:string)=>void}){
+ const match=value.match(/^cubic\\(([-+0-9.e]+),\\s*([-+0-9.e]+),\\s*([-+0-9.e]+),\\s*([-+0-9.e]+)\\)$/);
+ const points=(match?match.slice(1).map(Number):[.25,.1,.25,1]) as [number,number,number,number];
+ const [x1,y1,x2,y2]=points;
+ const [dragging,setDragging]=useState<0|1|null>(null);
+ const svgRef=useRef<SVGSVGElement>(null);
+ const updatePoint=(index:0|1,x:number,y:number)=>{
+  const next=[...points] as [number,number,number,number];
+  next[index*2]=Math.max(0,Math.min(1,x));next[index*2+1]=Math.max(0,Math.min(1,y));
+  onChange("cubic("+next.map(v=>Number(v.toFixed(3))).join(",")+")");
+ };
+ const move=(event:React.PointerEvent<SVGSVGElement>)=>{
+  if(dragging===null||!svgRef.current)return;
+  const rect=svgRef.current.getBoundingClientRect();
+  const x=(event.clientX-rect.left)/rect.width;
+  const y=1-(event.clientY-rect.top)/rect.height;
+  updatePoint(dragging,(x-.07)/.86,(y-.12)/.76);
+ };
+ const p1={x:16+x1*188,y:105-y1*90},p2={x:16+x2*188,y:105-y2*90};
+ return <div className="bezier-editor">
+  <div className="bezier-head"><b>CUBIC BEZIER</b><small>DRAG THE CONTROL POINTS</small></div>
+  <svg ref={svgRef} viewBox="0 0 220 120" onPointerDown={event=>{const handle=(event.target as SVGElement).getAttribute("data-handle");if(handle==="0"||handle==="1"){setDragging(Number(handle) as 0|1);event.currentTarget.setPointerCapture(event.pointerId);event.preventDefault();}}} onPointerMove={move} onPointerUp={()=>setDragging(null)} onPointerCancel={()=>setDragging(null)}>
+   <path d="M 16 105 L 204 15" className="bezier-diagonal"/>
+   <path d="M 16 105 L 16 15 L 204 15" className="bezier-guides"/>
+   <line x1="16" y1="105" x2={p1.x} y2={p1.y} className="bezier-handle-line"/>
+   <line x1="204" y1="15" x2={p2.x} y2={p2.y} className="bezier-handle-line"/>
+   <path d={`M 16 105 C ${p1.x} ${p1.y}, ${p2.x} ${p2.y}, 204 15`} className="bezier-curve"/>
+   <circle cx={p1.x} cy={p1.y} r="6" data-handle="0" className="bezier-handle"/>
+   <circle cx={p2.x} cy={p2.y} r="6" data-handle="1" className="bezier-handle"/>
+  </svg>
+  <div className="bezier-values">
+   {(["X1","Y1","X2","Y2"] as const).map((label,i)=><Field key={label} label={label} value={points[i]} type="number" step={.01} onChange={v=>updatePoint(Math.floor(i/2) as 0|1,i%2===0?Number(v):points[i-1],i%2===1?Number(v):points[i+1])}/>)}
+  </div>
+ </div>;
 }
 function MotionInspector({sequence,update}:{sequence?:AnimationSequence;update:(v:Partial<AnimationSequence["motion"]>)=>void}){
  if(!sequence)return null;const m=sequence.motion;
