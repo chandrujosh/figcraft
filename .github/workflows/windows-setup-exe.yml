@@ -1,0 +1,67 @@
+name: Build Windows Setup EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/native-scroll-animation
+    paths:
+      - packaging/windows/**
+      - build-windows-setup.ps1
+      - .github/workflows/windows-setup-exe.yml
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-setup-exe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install WiX and NSIS
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          $dotnetTools = Join-Path $env:USERPROFILE '.dotnet\tools'
+          $env:PATH = "$dotnetTools;$env:PATH"
+          $dotnetTools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+          choco install nsis -y --no-progress
+          $nsisPath = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          if (Test-Path (Join-Path $nsisPath 'makensis.exe')) {
+            $env:PATH = "$nsisPath;$env:PATH"
+            $nsisPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+          makensis /VERSION
+          wix --version
+
+      - name: Build MSI, Setup.exe and portable package
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File packaging/windows/package.ps1 -Arch x64
+
+      - name: Upload Windows Setup.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: FigCraft-Windows-Setup-x64
+          path: dist/release/*-windows-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 14
