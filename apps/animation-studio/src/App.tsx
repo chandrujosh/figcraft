@@ -31,6 +31,14 @@ const PRESETS: { group: string; name: string; property: AnimProperty; from: numb
 
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
 function selectorFor(id: string) { return `[data-avab-id="${CSS.escape(id)}"]`; }
+function serializeFrame(frame: HTMLIFrameElement): string {
+  const source=frame.contentDocument;
+  if(!source)return "";
+  const root=source.documentElement.cloneNode(true) as HTMLElement;
+  root.querySelector("#avab-editor-style")?.remove();
+  root.querySelectorAll("[data-avab-selected]").forEach(el=>el.removeAttribute("data-avab-selected"));
+  return "<!doctype html>\\n"+root.outerHTML;
+}
 function fileName(name: string) { return name.replace(/[^a-z0-9-_]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "motion-project"; }
 
 export default function App() {
@@ -337,6 +345,19 @@ export default function App() {
     setPlayhead(value);
     controllerRef.current?.seek(currentSequence?.id??"",value);
   };
+  const readCss=(property:string)=>{
+    const el=iframeRef.current?.contentDocument?.querySelector(selectorFor(selected)) as HTMLElement|null;
+    if(!el)return property==="position"?"static":"auto";
+    const inline=el.style.getPropertyValue(property);
+    return inline||iframeRef.current?.contentWindow?.getComputedStyle(el).getPropertyValue(property)||"auto";
+  };
+  const writeCss=(property:string,value:string)=>{
+    const frame=iframeRef.current,el=frame?.contentDocument?.querySelector(selectorFor(selected)) as HTMLElement|null;
+    if(!frame||!el)return;
+    if(value==="auto"||value==="")el.style.removeProperty(property);else el.style.setProperty(property,value);
+    const html=serializeFrame(frame);
+    commit(d=>{d.html=html;},`CSS ${property} updated`);
+  };
   const switchBreakpoint=(bp:Breakpoint)=>{
     setBreakpoint(bp);
     const frame=iframeRef.current;
@@ -425,7 +446,7 @@ export default function App() {
           {tab==="Animate"&&<AnimateInspector addTrack={addTrack} track={currentTrack} updateTrack={updateTrack} removeTrack={removeTrack} addKeyframe={addKeyframe} selected={selected}/>}
           {tab==="Timeline"&&<TimelineInspector sequence={currentSequence} track={currentTrack} updateKeyframe={updateKeyframe} playhead={playhead}/>}
           {tab==="Motion"&&<MotionInspector sequence={currentSequence} update={updateMotion}/>}
-          {tab==="Advanced"&&<AdvancedInspector sequence={currentSequence} updateTrigger={updateTrigger} breakpoint={breakpoint} track={currentTrack} commit={commit}/>}
+          {tab==="Advanced"&&<AdvancedInspector sequence={currentSequence} updateTrigger={updateTrigger} breakpoint={breakpoint} track={currentTrack} commit={commit} readCss={readCss} writeCss={writeCss}/>}
         </div>
         <div className="inspector-footer"><span className={previewMode?"green-dot":"amber-dot"}/>{status}</div>
       </aside>
@@ -463,10 +484,10 @@ function MotionInspector({sequence,update}:{sequence?:AnimationSequence;update:(
  if(!sequence)return null;const m=sequence.motion;
  return <><Section title="Timing"><Field label="Duration" value={m.duration} unit="s" type="number" step={.05} onChange={v=>update({duration:Number(v)})}/><Field label="Delay" value={m.delay} unit="s" type="number" step={.05} onChange={v=>update({delay:Number(v)})}/><Field label="Playback speed" value={m.speed} unit="×" type="number" step={.1} onChange={v=>update({speed:Number(v)})}/><Field label="Direction" value={m.direction} type="select" options={["normal","reverse","alternate","alternate-reverse"]} onChange={v=>update({direction:v as AnimationSequence["motion"]["direction"]})}/></Section><Section title="Repeat"><Field label="Repeat count (-1 = infinite)" value={m.repeat} type="number" onChange={v=>update({repeat:Number(v)})}/><Field label="Repeat delay" value={m.repeatDelay} unit="s" type="number" onChange={v=>update({repeatDelay:Number(v)})}/><Field label="Yoyo" value={m.yoyo} type="checkbox" onChange={v=>update({yoyo:Boolean(v)})}/></Section><Section title="Stagger"><Field label="Enable stagger" value={m.stagger} type="checkbox" onChange={v=>update({stagger:Boolean(v)})}/><Field label="Amount" value={m.staggerAmount} unit="s" type="number" step={.01} onChange={v=>update({staggerAmount:Number(v)})}/><Field label="Stagger from" value={m.staggerFrom} type="select" options={["start","center","edges","random","end"]} onChange={v=>update({staggerFrom:v as AnimationSequence["motion"]["staggerFrom"]})}/><Field label="Overlap" value={m.overlap} unit="s" type="number" step={.05} onChange={v=>update({overlap:Number(v)})}/></Section><Section title="Accessibility"><Field label="Respect reduced motion" value={m.respectReducedMotion} type="checkbox" onChange={v=>update({respectReducedMotion:Boolean(v)})}/></Section></>;
 }
-function AdvancedInspector({sequence,updateTrigger,breakpoint,track,commit}:{sequence?:AnimationSequence;updateTrigger:(v:Partial<AnimationSequence["trigger"]>)=>void;breakpoint:Breakpoint;track?:PropertyTrack;commit:(f:(d:StudioProject)=>void,label?:string)=>void}){
+function AdvancedInspector({sequence,updateTrigger,breakpoint,track,commit,readCss,writeCss}:{sequence?:AnimationSequence;updateTrigger:(v:Partial<AnimationSequence["trigger"]>)=>void;breakpoint:Breakpoint;track?:PropertyTrack;commit:(f:(d:StudioProject)=>void,label?:string)=>void;readCss:(p:string)=>string;writeCss:(p:string,v:string)=>void}){
  if(!sequence)return null;
  const apply=(enabled:boolean)=>{if(!track)return;commit(d=>{const s=d.sequences.find(x=>x.id===sequence.id);const t=s?.tracks.find(x=>x.id===track.id);if(!t)return;t.overrides={...t.overrides,[breakpoint]:{enabled,keyframes:clone(t.overrides?.[breakpoint]?.keyframes??t.keyframes)}};},`${breakpoint} override changed`);};
  const current=track?.overrides?.[breakpoint];
- return <><Section title="Responsive breakpoint"><div className="breakpoint-pill">{breakpoint.toUpperCase()}</div><p className="helper">Overrides are stored per desktop, tablet and mobile. Disable this track or change its keyframe values for the active breakpoint.</p>{track&&<><Field label={`Enable on ${breakpoint}`} value={current?.enabled??true} type="checkbox" onChange={v=>apply(Boolean(v))}/>{(current?.keyframes??track.keyframes).map(k=><div className="keyframe-row" key={k.id}><b>{k.at}s</b><Field label="Value" value={k.value} onChange={v=>commit(d=>{const t=d.sequences.find(s=>s.id===sequence.id)?.tracks.find(x=>x.id===track.id);if(!t)return;const bp=t.overrides?.[breakpoint];if(bp)bp.keyframes=bp.keyframes.map(x=>x.id===k.id?{...x,value:v}:x);else t.overrides={...t.overrides,[breakpoint]:{enabled:true,keyframes:t.keyframes.map(x=>x.id===k.id?{...x,value:v}:x)}};})}/></div>)}</>}</Section><Section title="Advanced trigger"><Field label="Scroller selector" value={sequence.trigger.scroller} onChange={v=>updateTrigger({scroller:String(v)})}/><Field label="Horizontal" value={sequence.trigger.horizontal} type="checkbox" onChange={v=>updateTrigger({horizontal:Boolean(v)})}/><Field label="Start marker" value={sequence.trigger.markers} type="checkbox" onChange={v=>updateTrigger({markers:Boolean(v)})}/><Field label="Page scrolled threshold" value={sequence.trigger.threshold} type="number" onChange={v=>updateTrigger({threshold:Number(v)})}/></Section><Section title="CSS position & layout"><p className="helper">Position modes (static, relative, absolute, fixed, sticky) and offsets are ordinary CSS. Animate Top/Right/Bottom/Left in the Animate tab. The preview respects the imported page's positioning context.</p></Section></>;
+ return <><Section title="Responsive breakpoint"><div className="breakpoint-pill">{breakpoint.toUpperCase()}</div><p className="helper">Overrides are stored per desktop, tablet and mobile. Disable this track or change its keyframe values for the active breakpoint.</p>{track&&<><Field label={`Enable on ${breakpoint}`} value={current?.enabled??true} type="checkbox" onChange={v=>apply(Boolean(v))}/>{(current?.keyframes??track.keyframes).map(k=><div className="keyframe-row" key={k.id}><b>{k.at}s</b><Field label="Value" value={k.value} onChange={v=>commit(d=>{const t=d.sequences.find(s=>s.id===sequence.id)?.tracks.find(x=>x.id===track.id);if(!t)return;const bp=t.overrides?.[breakpoint];if(bp)bp.keyframes=bp.keyframes.map(x=>x.id===k.id?{...x,value:v}:x);else t.overrides={...t.overrides,[breakpoint]:{enabled:true,keyframes:t.keyframes.map(x=>x.id===k.id?{...x,value:v}:x)}};})}/></div>)}</>}</Section><Section title="Advanced trigger"><Field label="Scroller selector" value={sequence.trigger.scroller} onChange={v=>updateTrigger({scroller:String(v)})}/><Field label="Horizontal" value={sequence.trigger.horizontal} type="checkbox" onChange={v=>updateTrigger({horizontal:Boolean(v)})}/><Field label="Start marker" value={sequence.trigger.markers} type="checkbox" onChange={v=>updateTrigger({markers:Boolean(v)})}/><Field label="Page scrolled threshold" value={sequence.trigger.threshold} type="number" onChange={v=>updateTrigger({threshold:Number(v)})}/></Section><Section title="CSS position & layout"><p className="helper">Position is applied to the selected real DOM element. Sticky positioning needs a scrollable ancestor and an offset.</p><Field label="Position mode" value={readCss("position")} type="select" options={["static","relative","absolute","fixed","sticky"]} onChange={v=>writeCss("position",String(v))}/>{(["top","right","bottom","left"] as const).map(side=><Field key={side} label={side[0].toUpperCase()+side.slice(1)} value={readCss(side)} onChange={v=>writeCss(side,String(v))}/>)}<Field label="Z-index" value={readCss("z-index")} onChange={v=>writeCss("z-index",String(v))}/><Field label="Overflow" value={readCss("overflow")} type="select" options={["visible","hidden","clip","auto","scroll"]} onChange={v=>writeCss("overflow",String(v))}/><Field label="Pointer events" value={readCss("pointer-events")} type="select" options={["auto","none","visible","painted"]} onChange={v=>writeCss("pointer-events",String(v))}/></Section></>;
 }
 function download(blob:Blob,name:string){const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);}
