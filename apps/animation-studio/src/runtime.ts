@@ -99,11 +99,12 @@ function makeTimeline(seq:AnimationSequence,doc:Document,win:Window,hooks:Hooks,
  const motion=seq.motion;
  if(motion.respectReducedMotion&&win.matchMedia("(prefers-reduced-motion: reduce)").matches)return null;
  const tl=gsap.timeline({paused:true,repeat:motion.repeat,repeatDelay:motion.repeatDelay,yoyo:motion.yoyo,timeScale:Math.max(.05,motion.speed),onStart:()=>{hooks.onSequenceStart?.(seq.id);win.dispatchEvent(new CustomEvent("avab:animation-start",{detail:{id:seq.id}}));},onComplete:()=>{hooks.onSequenceComplete?.(seq.id);win.dispatchEvent(new CustomEvent("avab:animation-complete",{detail:{id:seq.id}}));}});
- seq.tracks.forEach(track=>{
+ seq.tracks.forEach((track,index)=>{
   const override=track.overrides?.[breakpoint];
   if(override?.enabled===false)return;
   const activeTrack=override?.keyframes?{...track,keyframes:override.keyframes}:track;
-  easeTracks(tl,doc,activeTrack,seq.trigger.target,0,motion.stagger?{each:motion.staggerAmount,from:motion.staggerFrom}:undefined,warnings);
+  const sequenceOffset=index*Math.max(0,motion.duration-motion.overlap);
+  easeTracks(tl,doc,activeTrack,seq.trigger.target,track.startTime+sequenceOffset,motion.stagger?{each:motion.staggerAmount,from:motion.staggerFrom}:undefined,warnings);
  });
  if(motion.direction==="reverse"||motion.direction==="alternate-reverse")tl.reversed(true);
  if(motion.direction==="alternate"||motion.direction==="alternate-reverse")tl.yoyo(true);
