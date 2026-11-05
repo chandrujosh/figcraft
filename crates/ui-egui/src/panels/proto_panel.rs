@@ -1380,15 +1380,23 @@ fn scroll_animation_card(ui: &mut Ui, node_id: NodeId, index: usize, animation: 
     let mut remove = false;
     let title = format!("{}##scroll-animation-{index}", animation.name);
     egui::CollapsingHeader::new(title).id_salt(("scroll-animation", node_id.0, index)).default_open(index == 0).show(ui, |ui| {
+        // Keep the editor constrained to the inspector column. In particular, never ask a
+        // TextEdit or a slider row for an unbounded width: the inspector is a narrow, vertically
+        // scrolling panel and its contents must not create horizontal overflow.
+        let content_width = ui.available_width();
+        ui.set_width(content_width);
         ui.horizontal_wrapped(|ui| {
             ui.checkbox(&mut animation.enabled, tr("Enabled"));
             ui.checkbox(&mut animation.reverse, tr("Reverse"));
         });
-        ui.add(egui::TextEdit::singleline(&mut animation.name).hint_text(tr("Animation name")).desired_width(f32::INFINITY));
+        ui.add_sized(
+            egui::vec2(ui.available_width(), FIELD_H),
+            egui::TextEdit::singleline(&mut animation.name).hint_text(tr("Animation name")),
+        );
         scroll_animation_controls(ui, node_id, index, animation);
         ui.separator();
         remove_step = scroll_animation_steps(ui, node_id, index, animation);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.small_button(tr("Duplicate")).clicked() {
                 duplicate = true;
             }
@@ -1409,21 +1417,27 @@ fn scroll_animation_controls(ui: &mut Ui, node_id: NodeId, index: usize, animati
                 ui.selectable_value(&mut animation.trigger, trigger, trigger.label());
             }
         });
+    // Put each slider on its own row. A paired "Start / End" row used to exceed the inspector's
+    // minimum width at common Windows scaling factors, clipping the left side of the property UI.
     ui.horizontal(|ui| {
         ui.label(tr("Start"));
-        ui.add(egui::Slider::new(&mut animation.start, 0.0..=99.9).suffix("%"));
+        let width = ui.available_width().max(40.0);
+        ui.add_sized(egui::vec2(width, FIELD_H), egui::Slider::new(&mut animation.start, 0.0..=99.9).suffix("%"));
     });
     ui.horizontal(|ui| {
         ui.label(tr("End"));
-        ui.add(egui::Slider::new(&mut animation.end, (animation.start + 0.1)..=100.0).suffix("%"));
+        let width = ui.available_width().max(40.0);
+        ui.add_sized(egui::vec2(width, FIELD_H), egui::Slider::new(&mut animation.end, (animation.start + 0.1)..=100.0).suffix("%"));
     });
     ui.horizontal(|ui| {
         ui.label(tr("Duration"));
-        ui.add(egui::DragValue::new(&mut animation.duration_ms).range(0..=600_000).suffix(" ms"));
+        let width = ui.available_width().max(40.0);
+        ui.add_sized(egui::vec2(width, FIELD_H), egui::DragValue::new(&mut animation.duration_ms).range(0..=600_000).suffix(" ms"));
     });
     ui.horizontal(|ui| {
         ui.label(tr("Delay"));
-        ui.add(egui::DragValue::new(&mut animation.delay_ms).range(0..=600_000).suffix(" ms"));
+        let width = ui.available_width().max(40.0);
+        ui.add_sized(egui::vec2(width, FIELD_H), egui::DragValue::new(&mut animation.delay_ms).range(0..=600_000).suffix(" ms"));
     });
     ui.label(
         egui::RichText::new(tr("Scroll scrubbing follows scroll position; duration and delay are stored for future time-based triggers."))
@@ -1452,9 +1466,13 @@ fn scroll_animation_steps(ui: &mut Ui, node_id: NodeId, animation_index: usize, 
 fn scroll_animation_step(ui: &mut Ui, node_id: NodeId, animation_index: usize, step_index: usize, step: &mut AnimationStep) -> bool {
     let mut remove = false;
     ui.group(|ui| {
+        // Explicitly constrain each editor row to the inspector column. Separate value and
+        // progress controls avoid the old four-control horizontal row overflowing at 240–280 pt.
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("{} {}", tr("Step"), step_index + 1));
+            let combo_width = ui.available_width().min(150.0).max(72.0);
             egui::ComboBox::from_id_salt(("scroll-step-property", node_id.0, animation_index, step_index))
+                .width(combo_width)
                 .selected_text(step.property.label())
                 .show_ui(ui, |ui| {
                     for property in AnimationProperty::ALL {
@@ -1473,15 +1491,23 @@ fn scroll_animation_step(ui: &mut Ui, node_id: NodeId, animation_index: usize, s
         };
         ui.horizontal(|ui| {
             ui.label(tr("From"));
-            ui.add(egui::DragValue::new(&mut step.from).range(min_value..=max_value).speed(0.1));
+            let width = ui.available_width().max(40.0);
+            ui.add_sized(egui::vec2(width, FIELD_H), egui::DragValue::new(&mut step.from).range(min_value..=max_value).speed(0.1));
+        });
+        ui.horizontal(|ui| {
             ui.label(tr("To"));
-            ui.add(egui::DragValue::new(&mut step.to).range(min_value..=max_value).speed(0.1));
+            let width = ui.available_width().max(40.0);
+            ui.add_sized(egui::vec2(width, FIELD_H), egui::DragValue::new(&mut step.to).range(min_value..=max_value).speed(0.1));
         });
         ui.horizontal(|ui| {
             ui.label(tr("In"));
-            ui.add(egui::Slider::new(&mut step.start, 0.0..=0.999));
+            let width = ui.available_width().max(40.0);
+            ui.add_sized(egui::vec2(width, FIELD_H), egui::Slider::new(&mut step.start, 0.0..=0.999));
+        });
+        ui.horizontal(|ui| {
             ui.label(tr("Out"));
-            ui.add(egui::Slider::new(&mut step.end, (step.start + 0.001)..=1.0));
+            let width = ui.available_width().max(40.0);
+            ui.add_sized(egui::vec2(width, FIELD_H), egui::Slider::new(&mut step.end, (step.start + 0.001)..=1.0));
         });
         egui::ComboBox::from_id_salt(("scroll-step-easing", node_id.0, animation_index, step_index))
             .width(ui.available_width())
