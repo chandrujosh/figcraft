@@ -1,0 +1,41 @@
+name: Apply prepared FigCraft changes
+on:
+  push:
+    branches:
+      - feature/native-scroll-animation
+    paths:
+      - patches/figcraft-complete-feature.patch.gz.b64
+      - .github/workflows/apply-figcraft-patch.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Apply prepared source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="patches/figcraft-complete-feature.patch.gz.b64"
+          if [[ ! -f "$bundle" ]]; then
+            echo "Patch bundle already applied; nothing to do."
+            exit 0
+          fi
+          python3 - "$bundle" <<'PY'
+          import base64, gzip, pathlib, sys
+          encoded = pathlib.Path(sys.argv[1]).read_text(encoding="ascii").strip()
+          patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+          pathlib.Path("/tmp/figcraft-native-scroll.patch").write_bytes(patch)
+          PY
+          git apply --check /tmp/figcraft-native-scroll.patch
+          git apply /tmp/figcraft-native-scroll.patch
+          rm "$bundle"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add native scroll animation builder and Windows setup installer"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
