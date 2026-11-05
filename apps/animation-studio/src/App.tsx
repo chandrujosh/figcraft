@@ -167,7 +167,13 @@ export default function App() {
       const iframeWindow=frame.contentWindow as (Window & {__avabUpdateOverlay?:()=>void})|null;
       iframeWindow?.setTimeout(()=>{
         const overlay=d.createElement("div");overlay.id="avab-selection-overlay";
+        overlay.style.cssText="position:fixed;display:none;box-sizing:border-box;border:1px solid #d7f75b;outline:1px solid #10130b;z-index:2147483647;pointer-events:none;";
         overlay.innerHTML=["nw","n","ne","e","se","s","sw","w"].map(handle=>'<i data-avab-resize="'+handle+'"></i>').join("");
+        const handleStyles:Record<string,string>={nw:"left:0;top:0;transform:translate(-50%,-50%);cursor:nwse-resize;",n:"left:50%;top:0;transform:translate(-50%,-50%);cursor:ns-resize;",ne:"left:100%;top:0;transform:translate(-50%,-50%);cursor:nesw-resize;",e:"left:100%;top:50%;transform:translate(-50%,-50%);cursor:ew-resize;",se:"left:100%;top:100%;transform:translate(-50%,-50%);cursor:nwse-resize;",s:"left:50%;top:100%;transform:translate(-50%,-50%);cursor:ns-resize;",sw:"left:0;top:100%;transform:translate(-50%,-50%);cursor:nesw-resize;",w:"left:0;top:50%;transform:translate(-50%,-50%);cursor:ew-resize;"};
+        overlay.querySelectorAll<HTMLElement>("[data-avab-resize]").forEach(handle=>{
+          const name=handle.dataset.avabResize||"se";
+          handle.style.cssText="position:absolute;width:9px;height:9px;box-sizing:border-box;background:#d7f75b;border:1px solid #14170d;border-radius:2px;pointer-events:auto;"+(handleStyles[name]||handleStyles.se);
+        });
         d.body.appendChild(overlay);
         if(iframeWindow)iframeWindow.__avabUpdateOverlay=updateSelectionOverlay;
         updateSelectionOverlay();
