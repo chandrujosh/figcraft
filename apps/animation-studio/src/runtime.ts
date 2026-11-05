@@ -24,30 +24,43 @@ function splitText(el:Element,mode:string):HTMLElement[]{
  const html=el as HTMLElement;
  if(html.dataset.avabSplit==="true")return [...html.querySelectorAll<HTMLElement>(".avab-split-unit")];
  const text=html.textContent??"";
- const pieces=mode==="words"?text.split(/(\s+)/):Array.from(text);
  html.textContent="";
  html.dataset.avabSplit="true";
+ const pieces=mode==="words"||mode==="lines"?(text.match(/\\S+\\s*/g)??[]):Array.from(text);
  const result:HTMLElement[]=[];
  for(const piece of pieces){
-  if(!piece){continue;}
-  if(/^\s+$/.test(piece)){html.append(html.ownerDocument.createTextNode(piece));continue;}
+  if(!piece)continue;
   const span=html.ownerDocument.createElement("span");
-  span.className="avab-split-unit";span.style.display="inline-block";span.style.whiteSpace="pre";
-  span.textContent=piece;html.append(span);result.push(span);
+  span.className="avab-split-unit";
+  span.style.display="inline-block";
+  span.style.whiteSpace="pre";
+  span.textContent=piece;
+  html.append(span);
+  result.push(span);
  }
- return result;
+ if(mode!=="lines")return result;
+ const groups:HTMLElement[][]=[];
+ let lastTop=Number.NaN;
+ for(const unit of result){
+  const top=unit.getBoundingClientRect().top;
+  if(!Number.isFinite(lastTop)||Math.abs(top-lastTop)>1.5)groups.push([]);
+  groups[groups.length-1].push(unit);
+  lastTop=top;
+ }
+ html.textContent="";
+ const lines:HTMLElement[]=[];
+ for(const group of groups){
+  const line=html.ownerDocument.createElement("span");
+  line.className="avab-split-unit avab-split-line";
+  line.style.display="block";
+  line.style.overflow="hidden";
+  group.forEach(unit=>line.append(unit));
+  html.append(line);
+  lines.push(line);
+ }
+ return lines;
 }
-function easeValue(name:string):string|((progress:number)=>number){
- const match=name.match(/^cubic\(([-+0-9.e]+),\s*([-+0-9.e]+),\s*([-+0-9.e]+),\s*([-+0-9.e]+)\)$/);
- if(!match)return name;
- const [x1,y1,x2,y2]=match.slice(1).map(Number);
- const bez=(t:number,a:number,b:number)=>3*(1-t)*(1-t)*t*a+3*(1-t)*t*t*b+t*t*t;
- return (x:number)=>{
-  let low=0,high=1,t=Math.max(0,Math.min(1,x));
-  for(let i=0;i<16;i++){const value=bez(t,x1,x2);if(value<x)low=t;else high=t;t=(low+high)/2;}
-  return bez(t,y1,y2);
- };
-}
+
 function styleFor(track:PropertyTrack,value:string|number):Record<string,string|number>{
  const prop=track.property;
  if(prop==="filter")return {filter:String(value)};
