@@ -31,6 +31,7 @@ const PRESETS: { group: string; name: string; property: AnimProperty; from: numb
 
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
 function selectorFor(id: string) { return `[data-avab-id="${CSS.escape(id)}"]`; }
+function selectorForMany(ids: string[]) { return ids.length>1?`:is(${ids.map(selectorFor).join(",")})`:ids[0]?selectorFor(ids[0]):""; }
 function serializeFrame(frame: HTMLIFrameElement): string {
   const source=frame.contentDocument;
   if(!source)return "";
@@ -46,6 +47,7 @@ export default function App() {
     try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) as StudioProject : DEMO; } catch { return DEMO; }
   });
   const [selected, setSelected] = useState("layer-1");
+  const [selectedIds, setSelectedIds] = useState<string[]>(["layer-1"]);
   const [layers, setLayers] = useState<LayerItem[]>([]);
   const [selectedLayer, setSelectedLayer] = useState<LayerItem | null>(null);
   const [activeSequenceId, setActiveSequenceId] = useState("");
@@ -126,18 +128,13 @@ export default function App() {
     const inject=() => {
       const d=frame.contentDocument;
       if(!d) return;
-      d.querySelectorAll("[data-avab-id]").forEach(el=>el.addEventListener("click", e=>{
-        if(previewModeRef.current) return;
-        e.preventDefault(); e.stopPropagation();
-        const id=(el as HTMLElement).dataset.avabId;
-        if(id) window.postMessage({type:"AVAB_SELECT",id},"*");
-      },true));
       d.addEventListener("pointerdown",e=>{
         if(previewModeRef.current) return;
-        const target=e.target instanceof Element?e.target.closest("[data-avab-id]"):null;
-        if(!target) return;
+        const pointer=e as PointerEvent;
+        const target=pointer.target instanceof Element?pointer.target.closest("[data-avab-id]"):null;
+        if(!target||target.closest("[data-avab-locked='true']")) return;
         const id=target.getAttribute("data-avab-id");
-        if(id) window.postMessage({type:"AVAB_SELECT",id},"*");
+        if(id) window.postMessage({type:"AVAB_SELECT",id,extend:pointer.shiftKey||pointer.metaKey||pointer.ctrlKey},"*");
       },true);
       d.addEventListener("click",e=>{
         if(previewModeRef.current) return;
@@ -159,8 +156,13 @@ export default function App() {
   useEffect(()=>{
     const onMessage=(event:MessageEvent)=>{
       if(event.data?.type==="AVAB_SELECT" && typeof event.data.id==="string") {
-        setSelected(event.data.id);
-        setSelectedLayer(layers.find(l=>l.id===event.data.id)??null);
+        const id=event.data.id as string;
+        setSelected(id);
+        setSelectedIds(current=>{
+          if(event.data.extend===true) return current.includes(id)?current.filter(x=>x!==id):[...current,id];
+          return [id];
+        });
+        setSelectedLayer(layers.find(l=>l.id===id)??null);
       }
     };
     window.addEventListener("message",onMessage);
@@ -171,12 +173,11 @@ export default function App() {
     const doc=iframeRef.current?.contentDocument;
     if(!doc) return;
     doc.querySelectorAll("[data-avab-selected]").forEach(el=>el.removeAttribute("data-avab-selected"));
-    const el=doc.querySelector(selectorFor(selected));
-    el?.setAttribute("data-avab-selected","true");
+    selectedIds.forEach(id=>doc.querySelector(selectorFor(id))?.setAttribute("data-avab-selected","true"));
     const style=doc.getElementById("avab-editor-style");
     if(style) style.textContent=`[data-avab-id]{cursor:${previewMode?"auto":"crosshair"}!important;outline:1px dashed transparent;outline-offset:2px}[data-avab-id]:hover{outline-color:${previewMode?"transparent":"rgba(151,203,255,.65)"}!important}[data-avab-selected="true"]{outline:2px solid #d7f75b!important}`;
     if(previewMode) doc.body.classList.add("avab-preview"); else doc.body.classList.remove("avab-preview");
-  },[selected,previewMode,project.html]);
+  },[selected,selectedIds,previewMode,project.html]);
 
   const stopEngine=useCallback(()=>{controllerRef.current?.destroy();controllerRef.current=null;setPlaying(false);},[]);
   const rebuildEngine=useCallback(()=>{
@@ -216,13 +217,13 @@ export default function App() {
   };
   const addSequence=(type:TriggerType="scrollIntoView")=>{
     const s=createSequence(`Animation ${project.sequences.length+1}`,type);
-    s.trigger.target=selectorFor(selected);
+    s.trigger.target=selectorForMany(selectedIds);
     commit(d=>d.sequences.push(s),"New animation created");
     setActiveSequenceId(s.id);setActiveTrackId("");setTab("Trigger");
   };
   const addTrack=(property:AnimProperty)=>{
     if(!currentSequence)return;
-    const selector=selectorFor(selected);
+    const selector=selectorForMany(selectedIds);
     const track=createTrack(property,selector,currentSequence.motion.duration);
     commit(d=>d.sequences.find(s=>s.id===currentSequence.id)?.tracks.push(track),"Animation action added");
     setActiveTrackId(track.id);setTab("Animate");
@@ -352,9 +353,11 @@ export default function App() {
     return inline||iframeRef.current?.contentWindow?.getComputedStyle(el).getPropertyValue(property)||"auto";
   };
   const writeCss=(property:string,value:string)=>{
-    const frame=iframeRef.current,el=frame?.contentDocument?.querySelector(selectorFor(selected)) as HTMLElement|null;
-    if(!frame||!el)return;
-    if(value==="auto"||value==="")el.style.removeProperty(property);else el.style.setProperty(property,value);
+    const frame=iframeRef.current,doc=frame?.contentDocument;
+    if(!frame||!doc)return;
+    const elements=doc.querySelectorAll<HTMLElement>(selectorForMany(selectedIds));
+    if(!elements.length)return;
+    elements.forEach(el=>{if(value==="auto"||value==="")el.style.removeProperty(property);else el.style.setProperty(property,value);});
     const html=serializeFrame(frame);
     commit(d=>{d.html=html;},`CSS ${property} updated`);
   };
@@ -394,7 +397,7 @@ export default function App() {
         <div className="panel-tabs"><b>Structure</b><button onClick={refreshLayers}>⟳</button></div>
         <div className="panel-section-title"><span>LAYERS</span><span>{layers.length} elements</span></div>
         <div className="layers-list">
-          {layers.map(layer=><div key={layer.id} className={"layer-row "+(selected===layer.id?"selected":"")} style={{paddingLeft:10+layer.depth*12}} onClick={()=>setSelected(layer.id)}>
+          {layers.map(layer=><div key={layer.id} className={"layer-row "+(selectedIds.includes(layer.id)?"selected":"")} style={{paddingLeft:10+layer.depth*12}} onClick={e=>{setSelected(layer.id);setSelectedIds(current=>e.shiftKey?(current.includes(layer.id)?current.filter(x=>x!==layer.id):[...current,layer.id]):[layer.id]);}}>
             <span className="layer-type">{layer.tag==="img"?"▧":layer.tag==="svg"?"◇":layer.tag.startsWith("h")?"T":layer.tag==="button"?"▱":"▣"}</span>
             {renaming===layer.id?<input autoFocus value={layer.name} onChange={e=>setLayers(old=>old.map(x=>x.id===layer.id?{...x,name:e.target.value}:x))} onBlur={e=>{renameLayer(layer.id,e.currentTarget.value);setRenaming("");}} onKeyDown={e=>{if(e.key==="Enter"){renameLayer(layer.id,layer.name);setRenaming("");}}}/>:<span className="layer-name" onDoubleClick={e=>{e.stopPropagation();setRenaming(layer.id);}}>{layer.name}</span>}
             <button title="Hide/show" onClick={e=>{e.stopPropagation();toggleLayer(layer.id,"hidden");}}>◉</button><button title="Lock/unlock" onClick={e=>{e.stopPropagation();toggleLayer(layer.id,"locked");}}>⌑</button>
@@ -439,7 +442,7 @@ export default function App() {
         </section>
       </section>
       <aside className="right-panel">
-        <div className="inspector-header"><div><b>Animation Inspector</b><small>{selectedLayer?.name??"No element selected"}</small></div><button onClick={()=>setShowPresets(v=>!v)}>✦ Presets</button></div>
+        <div className="inspector-header"><div><b>Animation Inspector</b><small>{selectedIds.length>1?`${selectedIds.length} elements selected`:selectedLayer?.name??"No element selected"}</small></div><button onClick={()=>setShowPresets(v=>!v)}>✦ Presets</button></div>
         <nav className="inspector-tabs">{(["Trigger","Animate","Timeline","Motion","Advanced"] as Tab[]).map(t=><button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{t}</button>)}</nav>
         <div className="inspector-content">
           {tab==="Trigger"&&<TriggerInspector sequence={currentSequence} update={updateTrigger} addSequence={addSequence}/>}
