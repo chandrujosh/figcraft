@@ -26,7 +26,7 @@ function splitText(el:Element,mode:string):HTMLElement[]{
  const text=html.textContent??"";
  html.textContent="";
  html.dataset.avabSplit="true";
- const pieces=mode==="words"||mode==="lines"?(text.match(/\\S+\\s*/g)??[]):Array.from(text);
+ const pieces=mode==="words"||mode==="lines"?(text.match(/\S+\s*/g)??[]):Array.from(text);
  const result:HTMLElement[]=[];
  for(const piece of pieces){
   if(!piece)continue;
