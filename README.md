@@ -180,6 +180,8 @@ exposes to agents, and exported at 2x by FigCraft's own renderer. The source fil
 
 ## Features
 
+- Native scroll-triggered prototype animations: per-layer timelines with viewport/section scroll triggers, opacity, translation, scale, rotation, blur and parallax tracks. See [`docs/scroll-animation-builder.md`](docs/scroll-animation-builder.md) for the current scope and limitations.
+
 <table>
   <tr>
     <td width="50%" valign="top">

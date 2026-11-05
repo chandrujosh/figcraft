@@ -14,8 +14,10 @@
   warning when no signing secrets are set).
 
   Needs: Rust (MSVC toolchain + the target), the Windows SDK (rc.exe, signtool.exe),
-  and WiX v5: dotnet tool install --global wix --version 5.0.2
-             wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+  WiX v5: dotnet tool install --global wix --version 5.0.2
+         wix extension add -g WixToolset.UI.wixext/5.0.2
+         wix extension add -g WixToolset.Util.wixext/5.0.2
+  NSIS 3.x (makensis.exe on PATH) for the self-extracting Setup.exe bootstrapper.
 
 .EXAMPLE
   pwsh packaging/windows/package.ps1 -Arch x64
@@ -172,6 +174,25 @@ Invoke-Native 'MSI shortcut icon validation (ICE50)' {
 Remove-Item -Force -ErrorAction SilentlyContinue ([IO.Path]::ChangeExtension($Msi, '.wixpdb'))
 & (Join-Path $PSScriptRoot 'sign.ps1') $Msi
 
+# ---- self-extracting Setup.exe -----------------------------------------------------------------
+# Keep the existing, well-tested WiX MSI as the actual installer. The NSIS executable is a small
+# bootstrapper that embeds the MSI and launches its normal interactive wizard. This preserves the
+# MSI's install scope, upgrade/uninstall behaviour, shortcuts, file associations and app launch.
+$MakensisCommand = Get-Command 'makensis' -ErrorAction SilentlyContinue
+$MakensisPath = if ($MakensisCommand) { $MakensisCommand.Path } else { $null }
+if (-not $MakensisPath) {
+  $NsisDefault = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+  if (Test-Path $NsisDefault) { $MakensisPath = $NsisDefault }
+}
+if (-not $MakensisPath) { throw 'makensis was not found. Install NSIS and add makensis.exe to PATH.' }
+$SetupExe = Join-Path $Dist "figcraft-$Version-windows-$Arch-setup.exe"
+$AppIcon = Join-Path $Root 'assets\app-icon\figcraft.ico'
+Invoke-Native 'NSIS Setup.exe bootstrapper' {
+  & $MakensisPath "-DMSI_PATH=$Msi" "-DOUTFILE=$SetupExe" "-DAPP_ICON=$AppIcon" "-DNUMERIC_VERSION=$MsiVersion" (Join-Path $PSScriptRoot 'figcraft-setup.nsi')
+}
+if (-not (Test-Path $SetupExe)) { throw "NSIS did not create Setup.exe: $SetupExe" }
+& (Join-Path $PSScriptRoot 'sign.ps1') $SetupExe
+
 # ---- portable zip ------------------------------------------------------------------------------
 $Portable = Join-Path $TargetDir "windows-package\figcraft-$Version-windows-$Arch-portable"
 Remove-Item -Recurse -Force $Portable -ErrorAction SilentlyContinue
@@ -207,4 +228,4 @@ if ($Arch -ne 'arm64' -or $HostArch -eq 'arm64') {
 } else {
   Write-Output "skipping $Smoke --version: an $Arch build doesn't run on this $HostArch machine"
 }
-Get-Item $Msi, $Zip | Format-Table Name, Length
+Get-Item $SetupExe, $Msi, $Zip | Format-Table Name, Length

@@ -5,7 +5,7 @@ use crate::props::{
     AutoLayout, ChildLayout, Constraints, Corners, Effect, EffectKind, ExportSetting, LayoutGrid, SPREAD_MITER_LIMIT, StrokeAlign, StrokeCap,
     StrokeProps,
 };
-use crate::proto::{Interaction, Overflow, ScrollPosition};
+use crate::proto::{Interaction, Overflow, ScrollAnimation, ScrollPosition};
 use crate::styles::{CollectionId, ModeId, StyleRefs, VariableId};
 use crate::text::TextData;
 use crate::vector::VectorNetwork;
@@ -559,6 +559,9 @@ pub struct Node {
     /// On a board: what this object is (a sticky note, a connector, a stamp…).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<crate::BoardItem>,
+    /// Native scroll-triggered animation timelines for this layer.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub scroll_animations: Vec<ScrollAnimation>,
 }
 
 pub(crate) fn yes() -> bool {
@@ -742,6 +745,7 @@ impl Node {
             dev_resources: Vec::new(),
             measurements: Vec::new(),
             board: None,
+            scroll_animations: Vec::new(),
         }
     }
 

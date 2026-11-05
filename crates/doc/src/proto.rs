@@ -211,7 +211,7 @@ pub enum Easing {
     Bouncy,
     Slow,
     /// A CSS-style cubic bezier through (0,0), (x1,y1), (x2,y2), (1,1).
-    #[serde(rename_all = "camelCase")]
+    #[serde(rename_all = "camelCase", alias = "custom_bezier")]
     CustomBezier {
         x1: f64,
         y1: f64,
@@ -219,7 +219,7 @@ pub enum Easing {
         y2: f64,
     },
     /// A damped spring (mass, stiffness, damping), played over the interaction's duration.
-    #[serde(rename_all = "camelCase")]
+    #[serde(rename_all = "camelCase", alias = "custom_spring")]
     CustomSpring {
         mass: f64,
         stiffness: f64,
@@ -822,6 +822,167 @@ fn is_true(b: &bool) -> bool {
 fn is_origin(p: &[f64; 2]) -> bool {
     *p == [0.0, 0.0]
 }
+
+/// The scroll lifecycle event that drives a layer's animation timeline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ScrollAnimationTrigger {
+    /// Scrub while the layer crosses the viewport from bottom to top.
+    WhileScrollingInView,
+    /// Scrub the animation across the nearest scrolling frame's complete scroll range.
+    #[default]
+    WhileScrolling,
+    /// Scrub from the moment the layer enters the viewport until its top reaches the viewport top.
+    ScrollIntoView,
+    /// Scrub while the layer leaves the viewport at the top edge.
+    ScrollOutOfView,
+}
+
+impl ScrollAnimationTrigger {
+    pub const ALL: [Self; 4] = [Self::WhileScrollingInView, Self::WhileScrolling, Self::ScrollIntoView, Self::ScrollOutOfView];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::WhileScrollingInView => "While scrolling in view",
+            Self::WhileScrolling => "While scrolling through section",
+            Self::ScrollIntoView => "Scroll into view",
+            Self::ScrollOutOfView => "Scroll out of view",
+        }
+    }
+}
+
+/// A transform or visual property animated by a scroll timeline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum AnimationProperty {
+    #[default]
+    Opacity,
+    TranslateX,
+    TranslateY,
+    Scale,
+    Rotate,
+    Blur,
+    /// Scroll-relative vertical offset for depth/parallax effects.
+    ParallaxY,
+}
+
+impl AnimationProperty {
+    pub const ALL: [Self; 7] = [
+        Self::Opacity,
+        Self::TranslateX,
+        Self::TranslateY,
+        Self::Scale,
+        Self::Rotate,
+        Self::Blur,
+        Self::ParallaxY,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Opacity => "Opacity",
+            Self::TranslateX => "Move X",
+            Self::TranslateY => "Move Y",
+            Self::Scale => "Scale",
+            Self::Rotate => "Rotate",
+            Self::Blur => "Blur",
+            Self::ParallaxY => "Parallax Y",
+        }
+    }
+}
+
+/// One independently-timed property track within a scroll animation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AnimationStep {
+    pub property: AnimationProperty,
+    pub from: f64,
+    pub to: f64,
+    /// Normalised position on the parent timeline (0..=1).
+    pub start: f64,
+    /// Normalised position on the parent timeline (0..=1).
+    pub end: f64,
+    pub easing: Easing,
+}
+
+impl Default for AnimationStep {
+    fn default() -> Self {
+        Self { property: AnimationProperty::Opacity, from: 0.0, to: 1.0, start: 0.0, end: 1.0, easing: Easing::EaseOut }
+    }
+}
+
+impl AnimationStep {
+    pub fn sanitized(mut self) -> Self {
+        let finite = |v: f64, fallback: f64, low: f64, high: f64| if v.is_finite() { v.clamp(low, high) } else { fallback };
+        self.start = finite(self.start, 0.0, 0.0, 0.999);
+        self.end = finite(self.end, 1.0, 0.0, 1.0).max(self.start + 0.001).min(1.0);
+        let (low, high) = match self.property {
+            AnimationProperty::Opacity => (0.0, 1.0),
+            AnimationProperty::Scale => (0.0, 100.0),
+            AnimationProperty::Blur => (0.0, crate::MAX_BLUR_RADIUS),
+            AnimationProperty::TranslateX | AnimationProperty::TranslateY | AnimationProperty::Rotate | AnimationProperty::ParallaxY => (-10_000.0, 10_000.0),
+        };
+        self.from = finite(self.from, 0.0, low, high);
+        self.to = finite(self.to, 1.0, low, high);
+        self
+    }
+}
+
+/// A named scroll-triggered animation attached to a single design layer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScrollAnimation {
+    pub name: String,
+    pub enabled: bool,
+    pub trigger: ScrollAnimationTrigger,
+    /// Scroll percentage at which the animation starts (0..=100).
+    pub start: f64,
+    /// Scroll percentage at which the animation completes (0..=100).
+    pub end: f64,
+    /// Timeline duration retained for time-driven playback and export runtimes.
+    pub duration_ms: u32,
+    /// Timeline delay retained for time-driven playback and export runtimes.
+    pub delay_ms: u32,
+    /// Play the timeline backwards while the trigger progress moves forwards.
+    pub reverse: bool,
+    pub steps: Vec<AnimationStep>,
+}
+
+impl Default for ScrollAnimation {
+    fn default() -> Self {
+        Self {
+            name: "Scroll animation".into(),
+            enabled: true,
+            trigger: ScrollAnimationTrigger::WhileScrolling,
+            start: 0.0,
+            end: 100.0,
+            duration_ms: 1000,
+            delay_ms: 0,
+            reverse: false,
+            steps: vec![AnimationStep::default()],
+        }
+    }
+}
+
+impl ScrollAnimation {
+    pub fn sanitized(mut self) -> Self {
+        self.name = self.name.trim().chars().take(80).collect();
+        if self.name.is_empty() {
+            self.name = "Scroll animation".into();
+        }
+        self.start = if self.start.is_finite() { self.start.clamp(0.0, 99.9) } else { 0.0 };
+        self.end = if self.end.is_finite() { self.end.clamp(self.start + 0.1, 100.0) } else { 100.0 };
+        self.duration_ms = self.duration_ms.min(600_000);
+        self.delay_ms = self.delay_ms.min(600_000);
+        self.steps.truncate(MAX_SCROLL_STEPS);
+        self.steps = self.steps.into_iter().map(AnimationStep::sanitized).collect();
+        self
+    }
+}
+
+/// The most animations stored on one layer.
+pub const MAX_SCROLL_ANIMATIONS: usize = 32;
+/// The most property tracks stored in one animation.
+pub const MAX_SCROLL_STEPS: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

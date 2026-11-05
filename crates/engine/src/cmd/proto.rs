@@ -466,7 +466,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
 mod tests {
     use super::*;
     use crate::params::id_of;
-    use figcraft_doc::proto::{Direction, Overflow, ScrollPosition};
+    use figcraft_doc::proto::{AnimationProperty, Direction, Overflow, ScrollAnimationTrigger, ScrollPosition};
 
     fn frame(s: &mut Session, x: f64) -> NodeId {
         let r = s.execute("node.create", &json!({"type": "frame", "x": x, "y": 0, "width": 100, "height": 200})).unwrap();
@@ -623,5 +623,52 @@ mod tests {
         let n = s.doc().unwrap().node(a).unwrap().clone();
         assert_eq!(n.overflow, Overflow::Vertical);
         assert_eq!(n.scroll_position, ScrollPosition::Fixed);
+    }
+
+    #[test]
+    fn scroll_animations_are_saved_sanitized_and_undoable() {
+        let mut s = Session::new();
+        let a = frame(&mut s, 0.0);
+        s.execute(
+            "node.set",
+            &json!({"id": a, "props": {"scrollAnimations": [{
+                "name": "  Hero fade  ",
+                "enabled": true,
+                "trigger": "scrollIntoView",
+                "start": -20.0,
+                "end": 150.0,
+                "durationMs": 900,
+                "delayMs": 120,
+                "reverse": false,
+                "steps": [
+                    {"property": "opacity", "from": -1.0, "to": 1.2, "start": 0.0, "end": 1.0, "easing": "easeOut"},
+                    {"property": "translateY", "from": 0.0, "to": 24.0, "start": 0.0, "end": 1.0, "easing": {"customBezier": {"x1": 0.25, "y1": 0.1, "x2": 0.25, "y2": 1.0}}}
+                ]
+            }]}}),
+        )
+        .unwrap();
+        let animation = s.doc().unwrap().node(a).unwrap().scroll_animations[0].clone();
+        assert_eq!(animation.name, "Hero fade");
+        assert_eq!(animation.trigger, ScrollAnimationTrigger::ScrollIntoView);
+        assert_eq!((animation.start, animation.end), (0.0, 100.0));
+        assert_eq!(animation.duration_ms, 900);
+        assert_eq!(animation.delay_ms, 120);
+        assert_eq!(animation.steps[0].property, AnimationProperty::Opacity);
+        assert_eq!((animation.steps[0].from, animation.steps[0].to), (0.0, 1.0));
+        assert_eq!(animation.steps[0].easing, Easing::EaseOut);
+        assert!(matches!(animation.steps[1].easing, Easing::CustomBezier { x1, y1, x2, y2 } if (x1, y1, x2, y2) == (0.25, 0.1, 0.25, 1.0)));
+
+        assert!(s.undo().unwrap());
+        assert!(s.doc().unwrap().node(a).unwrap().scroll_animations.is_empty());
+    }
+
+    #[test]
+    fn scroll_animations_reject_unknown_properties_and_too_many_tracks() {
+        let mut s = Session::new();
+        let a = frame(&mut s, 0.0);
+        assert!(s.execute("node.set", &json!({"id": a, "props": {"scrollAnimations": [{"name": "Bad", "steps": [{"property": "teleport", "from": 0, "to": 1}]}]}})).is_err());
+        let too_many = (0..33).map(|i| json!({"name": format!("Animation {i}")})).collect::<Vec<_>>();
+        assert!(s.execute("node.set", &json!({"id": a, "props": {"scrollAnimations": too_many}})).is_err());
+        assert!(s.doc().unwrap().node(a).unwrap().scroll_animations.is_empty());
     }
 }

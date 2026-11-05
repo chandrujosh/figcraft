@@ -183,6 +183,8 @@ node_props! {
     DevResources => dev_resources,
     Measurements => measurements,
     Board => board,
+    // Appended to preserve the binary property discriminants of existing documents.
+    ScrollAnimations => scroll_animations,
 }
 
 /// A document-level property. Lists of entries with ids (styles, comments, variable collections,

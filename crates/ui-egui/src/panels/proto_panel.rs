@@ -5,8 +5,8 @@
 use egui::{Align2, Color32, CornerRadius, Id, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use figcraft_color::Paint;
 use figcraft_doc::proto::{
-    Action, ConditionalBlock, Direction, Easing, GAMEPAD_BUTTONS, GAMEPAD_NAMES, Interaction, KeyMods, Overflow, OverlayAnchor, OverlayPosition,
-    ScrollPosition, Transition, Trigger, is_gamepad_button,
+    Action, AnimationProperty, AnimationStep, ConditionalBlock, Direction, Easing, GAMEPAD_BUTTONS, GAMEPAD_NAMES, Interaction, KeyMods, Overflow,
+    OverlayAnchor, OverlayPosition, ScrollAnimation, ScrollAnimationTrigger, ScrollPosition, Transition, Trigger, is_gamepad_button,
 };
 use figcraft_doc::{Document, Node, NodeId, NodeKind, VariableValue, proto};
 use serde_json::{Value, json};
@@ -334,6 +334,8 @@ pub fn prototype(app: &mut FigApp, ui: &mut Ui) {
     }
     widgets::separator(ui);
     scroll_section(app, ui, &doc, &sel, &node);
+    widgets::separator(ui);
+    scroll_animations(app, ui, &sel, &node);
 }
 
 /// Several layers with different interactions: "+" replaces them all with one click interaction
@@ -1298,6 +1300,218 @@ pub fn curve(p: &egui::Painter, r: Rect, e: Easing, col: Color32, dot: Option<f6
     p.with_clip_rect(r.expand(r.height() * 0.6)).add(Shape::line(pts, Stroke::new(1.5, col)));
     if let Some(x) = dot {
         p.circle_filled(at(x.clamp(0.0, 1.0)), 3.0, col);
+    }
+}
+
+fn scroll_animations(app: &mut FigApp, ui: &mut Ui, sel: &[NodeId], node: &Node) {
+    let mixed = sel
+        .iter()
+        .any(|id| app.session.doc().ok().and_then(|d| d.node(*id).map(|n| n.scroll_animations.clone())) != Some(node.scroll_animations.clone()));
+    ui.horizontal(|ui| {
+        widgets::label(ui, tr("Scroll animations"), Tokens::get(ui.ctx()).text);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("+").on_hover_text(tr("Add scroll animation")).clicked() && !mixed {
+                let mut animations = node.scroll_animations.clone();
+                if animations.len() < figcraft_doc::proto::MAX_SCROLL_ANIMATIONS {
+                    let mut animation = ScrollAnimation::default();
+                    animation.name = format!("Scroll animation {}", animations.len() + 1);
+                    animations.push(animation);
+                    save_scroll_animations(app, sel, &animations);
+                }
+            }
+        });
+    });
+    if mixed {
+        ui.label(egui::RichText::new(tr("Selected layers have different scroll animations. Select one layer to edit them.")).small().color(Tokens::get(ui.ctx()).text_secondary));
+        return;
+    }
+    if node.scroll_animations.is_empty() {
+        ui.label(egui::RichText::new(tr("Create an animation to control this layer as the prototype scrolls.")).small().color(Tokens::get(ui.ctx()).text_secondary));
+        return;
+    }
+
+    let mut animations = node.scroll_animations.clone();
+    let mut changed = false;
+    let mut remove_index = None;
+    let mut duplicate_index = None;
+    for index in 0..animations.len() {
+        let Some(animation) = animations.get_mut(index) else { continue };
+        let before = animation.clone();
+        let (remove_step, duplicate, remove) = scroll_animation_card(ui, node.id, index, animation);
+        if let Some(step_index) = remove_step {
+            if step_index < animation.steps.len() {
+                animation.steps.remove(step_index);
+                changed = true;
+            }
+        }
+        if duplicate {
+            duplicate_index = Some(index);
+        }
+        if remove {
+            remove_index = Some(index);
+        }
+        if *animation != before {
+            changed = true;
+        }
+    }
+    if let Some(index) = remove_index {
+        if index < animations.len() {
+            animations.remove(index);
+            changed = true;
+        }
+    }
+    if let Some(index) = duplicate_index {
+        if animations.len() < figcraft_doc::proto::MAX_SCROLL_ANIMATIONS {
+            if let Some(mut copy) = animations.get(index).cloned() {
+                copy.name = format!("{} copy", copy.name);
+                animations.insert(index + 1, copy);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        save_scroll_animations(app, sel, &animations);
+    }
+}
+
+fn scroll_animation_card(ui: &mut Ui, node_id: NodeId, index: usize, animation: &mut ScrollAnimation) -> (Option<usize>, bool, bool) {
+    let mut remove_step = None;
+    let mut duplicate = false;
+    let mut remove = false;
+    let title = format!("{}##scroll-animation-{index}", animation.name);
+    egui::CollapsingHeader::new(title).id_salt(("scroll-animation", node_id.0, index)).default_open(index == 0).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.checkbox(&mut animation.enabled, tr("Enabled"));
+            ui.checkbox(&mut animation.reverse, tr("Reverse"));
+        });
+        ui.add(egui::TextEdit::singleline(&mut animation.name).hint_text(tr("Animation name")).desired_width(f32::INFINITY));
+        scroll_animation_controls(ui, node_id, index, animation);
+        ui.separator();
+        remove_step = scroll_animation_steps(ui, node_id, index, animation);
+        ui.horizontal(|ui| {
+            if ui.small_button(tr("Duplicate")).clicked() {
+                duplicate = true;
+            }
+            if ui.small_button(tr("Remove animation")).clicked() {
+                remove = true;
+            }
+        });
+    });
+    (remove_step, duplicate, remove)
+}
+
+fn scroll_animation_controls(ui: &mut Ui, node_id: NodeId, index: usize, animation: &mut ScrollAnimation) {
+    egui::ComboBox::from_id_salt(("scroll-trigger", node_id.0, index))
+        .width(ui.available_width())
+        .selected_text(animation.trigger.label())
+        .show_ui(ui, |ui| {
+            for trigger in ScrollAnimationTrigger::ALL {
+                ui.selectable_value(&mut animation.trigger, trigger, trigger.label());
+            }
+        });
+    ui.horizontal(|ui| {
+        ui.label(tr("Start"));
+        ui.add(egui::Slider::new(&mut animation.start, 0.0..=99.9).suffix("%"));
+    });
+    ui.horizontal(|ui| {
+        ui.label(tr("End"));
+        ui.add(egui::Slider::new(&mut animation.end, (animation.start + 0.1)..=100.0).suffix("%"));
+    });
+    ui.horizontal(|ui| {
+        ui.label(tr("Duration"));
+        ui.add(egui::DragValue::new(&mut animation.duration_ms).range(0..=600_000).suffix(" ms"));
+    });
+    ui.horizontal(|ui| {
+        ui.label(tr("Delay"));
+        ui.add(egui::DragValue::new(&mut animation.delay_ms).range(0..=600_000).suffix(" ms"));
+    });
+    ui.label(
+        egui::RichText::new(tr("Scroll scrubbing follows scroll position; duration and delay are stored for future time-based triggers."))
+            .small()
+            .color(Tokens::get(ui.ctx()).text_secondary),
+    );
+}
+
+fn scroll_animation_steps(ui: &mut Ui, node_id: NodeId, animation_index: usize, animation: &mut ScrollAnimation) -> Option<usize> {
+    ui.horizontal(|ui| {
+        ui.strong(tr("Timeline steps"));
+        if ui.small_button("+").on_hover_text(tr("Add animation step")).clicked() && animation.steps.len() < figcraft_doc::proto::MAX_SCROLL_STEPS {
+            animation.steps.push(AnimationStep::default());
+        }
+    });
+    let mut remove_step = None;
+    for (step_index, step) in animation.steps.iter_mut().enumerate() {
+        if scroll_animation_step(ui, node_id, animation_index, step_index, step) {
+            remove_step = Some(step_index);
+        }
+    }
+    scroll_animation_timeline(ui, &animation.steps);
+    remove_step
+}
+
+fn scroll_animation_step(ui: &mut Ui, node_id: NodeId, animation_index: usize, step_index: usize, step: &mut AnimationStep) -> bool {
+    let mut remove = false;
+    ui.group(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("{} {}", tr("Step"), step_index + 1));
+            egui::ComboBox::from_id_salt(("scroll-step-property", node_id.0, animation_index, step_index))
+                .selected_text(step.property.label())
+                .show_ui(ui, |ui| {
+                    for property in AnimationProperty::ALL {
+                        ui.selectable_value(&mut step.property, property, property.label());
+                    }
+                });
+            if ui.small_button("×").on_hover_text(tr("Remove step")).clicked() {
+                remove = true;
+            }
+        });
+        let (min_value, max_value) = match step.property {
+            AnimationProperty::Opacity => (0.0, 1.0),
+            AnimationProperty::Scale => (0.0, 100.0),
+            AnimationProperty::Blur => (0.0, figcraft_doc::MAX_BLUR_RADIUS),
+            AnimationProperty::TranslateX | AnimationProperty::TranslateY | AnimationProperty::Rotate | AnimationProperty::ParallaxY => (-10_000.0, 10_000.0),
+        };
+        ui.horizontal(|ui| {
+            ui.label(tr("From"));
+            ui.add(egui::DragValue::new(&mut step.from).range(min_value..=max_value).speed(0.1));
+            ui.label(tr("To"));
+            ui.add(egui::DragValue::new(&mut step.to).range(min_value..=max_value).speed(0.1));
+        });
+        ui.horizontal(|ui| {
+            ui.label(tr("In"));
+            ui.add(egui::Slider::new(&mut step.start, 0.0..=0.999));
+            ui.label(tr("Out"));
+            ui.add(egui::Slider::new(&mut step.end, (step.start + 0.001)..=1.0));
+        });
+        egui::ComboBox::from_id_salt(("scroll-step-easing", node_id.0, animation_index, step_index))
+            .width(ui.available_width())
+            .selected_text(step.easing.label())
+            .show_ui(ui, |ui| {
+                for easing in Easing::ALL {
+                    ui.selectable_value(&mut step.easing, easing, easing.label());
+                }
+            });
+    });
+    remove
+}
+
+fn scroll_animation_timeline(ui: &mut Ui, steps: &[AnimationStep]) {
+    // Timeline overview: each bar shows the step's normalised start and end positions.
+    let (timeline, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), egui::Sense::hover());
+    let colors = Tokens::get(ui.ctx());
+    ui.painter().rect_filled(timeline, egui::CornerRadius::same(3), colors.field);
+    for (step_index, step) in steps.iter().enumerate() {
+        let left = egui::lerp(timeline.x_range(), step.start.clamp(0.0, 1.0) as f32);
+        let right = egui::lerp(timeline.x_range(), step.end.clamp(0.0, 1.0) as f32).max(left + 2.0);
+        let track = egui::Rect::from_min_max(egui::pos2(left, timeline.min.y + 2.0), egui::pos2(right.min(timeline.max.x), timeline.max.y - 2.0));
+        let color = if step_index % 2 == 0 { colors.accent } else { colors.selected_row };
+        ui.painter().rect_filled(track, egui::CornerRadius::same(2), color);
+    }
+}
+
+fn save_scroll_animations(app: &mut FigApp, sel: &[NodeId], animations: &[ScrollAnimation]) {
+    if let Ok(value) = serde_json::to_value(animations) {
+        app.set_props(sel, json!({"scrollAnimations": value}));
     }
 }
 

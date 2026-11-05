@@ -1,5 +1,7 @@
 use super::scroll::{apply_scroll, clamp_scroll, fit_viewport, page_settings, raise_fixed, viewport};
 use super::{Anim, Arc, Document, Easing, NodeId, Presenter, Scroller, Snapshot, Transition, Trigger, Value, Visit, json};
+use figcraft_doc::proto::{AnimationProperty, Overflow, ScrollAnimationTrigger};
+use figcraft_doc::{Blur, Effect, EffectKind};
 
 impl Presenter {
     /// Close the top overlay; it animates out with its opening transition reversed.
@@ -102,8 +104,46 @@ impl Presenter {
         if let Some(vp) = viewport(doc, self.current) {
             fit_viewport(&mut d, self.current, vp);
         }
+        self.apply_scroll_animations(&mut d, doc);
         self.display = Some((self.rev, d.clone()));
         Some(d)
+    }
+
+    /// Apply the scroll timelines to the player's displayed copy. The saved design is never
+    /// mutated; each repaint starts from the unanimated document and derives values from the
+    /// nearest scrolling ancestor.
+    fn apply_scroll_animations(&self, displayed: &mut Document, base: &Document) {
+        for id in base.subtree(self.current) {
+            let Some(source) = base.node(id) else { continue };
+            if source.scroll_animations.is_empty() || id == self.current {
+                continue;
+            }
+            let ancestors = base.ancestors(id);
+            let frame = ancestors
+                .iter()
+                .copied()
+                .find(|a| base.node(*a).is_some_and(|n| n.overflow != Overflow::None))
+                .or_else(|| ancestors.contains(&self.current).then_some(self.current));
+            let Some(frame) = frame else { continue };
+            let Some(frame_bounds) = base.world_bounds(frame) else { continue };
+            let Some(node_bounds) = base.world_bounds(id) else { continue };
+            let Some(frame_node) = base.node(frame) else { continue };
+            let range = if frame == self.current { self.range(base, frame) } else { super::scroll::scroll_range_in(base, frame, None) };
+            let scroll = self.scroll.get(&frame).copied().unwrap_or((0.0, 0.0));
+            let viewport_height = if frame == self.current {
+                viewport(base, frame).map_or(frame_node.height, |v| v.1)
+            } else {
+                frame_node.height
+            }
+            .max(1.0);
+            let relative_top = node_bounds.y0 - frame_bounds.y0 - scroll.1;
+            let visible_height = (node_bounds.y1 - node_bounds.y0).max(1.0);
+            let Some(target) = displayed.node_mut(id) else { continue };
+            for animation in source.scroll_animations.iter().filter(|a| a.enabled) {
+                let progress = scroll_animation_progress(animation, range, scroll, viewport_height, relative_top, visible_height);
+                apply_scroll_animation(target, animation, progress);
+            }
+        }
     }
 
     /// The player's state for `ui.inspect`.
@@ -230,6 +270,90 @@ impl Presenter {
         self.stop_scrolling();
         self.hovered.clear();
         self.rev += 1;
+    }
+}
+
+fn scroll_animation_progress(
+    animation: &figcraft_doc::proto::ScrollAnimation,
+    range: (f64, f64),
+    scroll: (f64, f64),
+    viewport_height: f64,
+    relative_top: f64,
+    visible_height: f64,
+) -> f64 {
+    let base_progress = match animation.trigger {
+        ScrollAnimationTrigger::WhileScrollingInView => (viewport_height - relative_top) / (viewport_height + visible_height),
+        ScrollAnimationTrigger::WhileScrolling => {
+            if range.1 > 0.0 {
+                scroll.1 / range.1
+            } else if range.0 > 0.0 {
+                scroll.0 / range.0
+            } else {
+                0.0
+            }
+        }
+        ScrollAnimationTrigger::ScrollIntoView => (viewport_height - relative_top) / viewport_height,
+        ScrollAnimationTrigger::ScrollOutOfView => -relative_top / visible_height,
+    };
+    let base_progress = if base_progress.is_finite() { base_progress.clamp(0.0, 1.0) } else { 0.0 };
+    let progress = ((base_progress * 100.0 - animation.start) / (animation.end - animation.start).max(0.1)).clamp(0.0, 1.0);
+    if animation.reverse { 1.0 - progress } else { progress }
+}
+
+fn apply_scroll_animation(target: &mut figcraft_doc::Node, animation: &figcraft_doc::proto::ScrollAnimation, progress: f64) {
+    let (mut opacity, mut translate_x, mut translate_y, mut scale, mut rotate, mut blur) = (None, 0.0, 0.0, 1.0, 0.0, None);
+    for step in &animation.steps {
+        if progress < step.start {
+            continue;
+        }
+        let length = (step.end - step.start).max(0.001);
+        let local = ((progress - step.start) / length).clamp(0.0, 1.0);
+        let eased = step.easing.eval(local);
+        let value = step.from + (step.to - step.from) * eased;
+        match step.property {
+            AnimationProperty::Opacity => opacity = Some(value.clamp(0.0, 1.0) as f32),
+            AnimationProperty::TranslateX => translate_x += value,
+            AnimationProperty::TranslateY | AnimationProperty::ParallaxY => translate_y += value,
+            AnimationProperty::Scale => scale = value.clamp(0.0, 100.0),
+            AnimationProperty::Rotate => rotate += value,
+            AnimationProperty::Blur => blur = Some(value.clamp(0.0, figcraft_doc::MAX_BLUR_RADIUS)),
+        }
+    }
+    if let Some(value) = opacity {
+        target.opacity = value;
+    }
+    apply_scroll_transform(target, translate_x, translate_y, scale, rotate);
+    if let Some(radius) = blur {
+        apply_scroll_blur(target, radius);
+    }
+}
+
+fn apply_scroll_transform(target: &mut figcraft_doc::Node, translate_x: f64, translate_y: f64, scale: f64, rotate: f64) {
+    if translate_x == 0.0 && translate_y == 0.0 && (scale - 1.0).abs() <= 1e-9 && rotate == 0.0 {
+        return;
+    }
+    let cx = target.width / 2.0;
+    let cy = target.height / 2.0;
+    let local = figcraft_geom::Affine::translate((cx, cy))
+        * figcraft_geom::Affine::rotate(-rotate.to_radians())
+        * figcraft_geom::Affine::scale_non_uniform(scale, scale)
+        * figcraft_geom::Affine::translate((-cx, -cy));
+    target.transform = figcraft_geom::Affine::translate((translate_x, translate_y)) * target.transform * local;
+}
+
+fn apply_scroll_blur(target: &mut figcraft_doc::Node, radius: f64) {
+    for effect in &mut target.effects {
+        if let EffectKind::LayerBlur(existing) = &mut effect.kind {
+            *existing = Blur::uniform(radius);
+            return;
+        }
+    }
+    if radius > 0.0 {
+        let mut effect = Effect::layer_blur();
+        if let EffectKind::LayerBlur(existing) = &mut effect.kind {
+            *existing = Blur::uniform(radius);
+        }
+        target.effects.push(effect);
     }
 }
 
