@@ -61,6 +61,8 @@ export default function App() {
   const [htmlInputOpen, setHtmlInputOpen] = useState(false);
   const [htmlDraft, setHtmlDraft] = useState("");
   const [showPresets, setShowPresets] = useState(false);
+  const [customPresets, setCustomPresets] = useState<PropertyTrack[]>(()=>{try{return JSON.parse(localStorage.getItem("figcraft-motion-presets-v1")||"[]") as PropertyTrack[];}catch{return [];}});
+  const [draggingKeyframe,setDraggingKeyframe]=useState<{trackId:string;keyId:string;at:number}|null>(null);
   const [renaming, setRenaming] = useState("");
   const [dragLayer, setDragLayer] = useState("");
   const [status, setStatus] = useState("Ready");
@@ -79,6 +81,7 @@ export default function App() {
   const duration = useMemo(() => Math.max(1, ...project.sequences.flatMap(s => s.tracks.flatMap(t => t.keyframes.map(k => k.at + t.startTime)))), [project.sequences]);
 
   useEffect(() => { projectRef.current = project; }, [project]);
+  useEffect(()=>{localStorage.setItem("figcraft-motion-presets-v1",JSON.stringify(customPresets));},[customPresets]);
   useEffect(() => { selectedRef.current = selected; previewModeRef.current = previewMode; }, [selected, previewMode]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -216,6 +219,14 @@ export default function App() {
     if(!currentSequence||!currentTrack)return;
     commit(d=>{const t=d.sequences.find(s=>s.id===currentSequence.id)?.tracks.find(x=>x.id===currentTrack.id);if(t)Object.assign(t,patch);});
   };
+  const duplicateSequence=()=>{
+    if(!currentSequence)return;
+    const copy=clone(currentSequence);
+    copy.id=makeId("seq");copy.name=`${copy.name} copy`;
+    copy.tracks=copy.tracks.map(track=>({...track,id:makeId("track"),keyframes:track.keyframes.map(k=>({...k,id:makeId("kf")}))}));
+    commit(d=>d.sequences.push(copy),"Animation duplicated");
+    setActiveSequenceId(copy.id);setActiveTrackId("");
+  };
   const addSequence=(type:TriggerType="scrollIntoView")=>{
     const s=createSequence(`Animation ${project.sequences.length+1}`,type);
     s.trigger.target=selectorForMany(selectedIds);
@@ -235,10 +246,41 @@ export default function App() {
   };
   const addKeyframe=()=>{
     if(!currentSequence||!currentTrack)return;
-    const at=Math.max(0,playhead);
+    const at=Math.max(0,playhead-currentTrack.startTime);
     const last=currentTrack.keyframes[currentTrack.keyframes.length-1];
     const key:Keyframe={id:makeId("kf"),at,value:last?.value??0,ease:"power2.out"};
     commit(d=>d.sequences.find(s=>s.id===currentSequence.id)?.tracks.find(t=>t.id===currentTrack.id)?.keyframes.push(key),"Keyframe added");
+  };
+  const startKeyframeDrag=(event:React.PointerEvent<HTMLButtonElement>,track:PropertyTrack,key:Keyframe)=>{
+    event.preventDefault();event.stopPropagation();
+    const lane=event.currentTarget.parentElement;
+    if(!lane)return;
+    const rect=lane.getBoundingClientRect();
+    const calculate=(clientX:number)=>Math.max(0,Math.min(duration-track.startTime,((clientX-rect.left)/Math.max(1,rect.width))*duration-track.startTime));
+    const move=(ev:PointerEvent)=>setDraggingKeyframe({trackId:track.id,keyId:key.id,at:calculate(ev.clientX)});
+    const up=(ev:PointerEvent)=>{
+      const at=calculate(ev.clientX);
+      document.removeEventListener("pointermove",move);
+      document.removeEventListener("pointerup",up);
+      updateKeyframe(track.id,key.id,{at});
+      setDraggingKeyframe(null);
+    };
+    document.addEventListener("pointermove",move);
+    document.addEventListener("pointerup",up,{once:true});
+  };
+  const saveCurrentPreset=()=>{
+    if(!currentTrack)return;
+    const name=window.prompt("Name this reusable animation preset",currentTrack.label);
+    if(!name?.trim())return;
+    const preset=clone(currentTrack);preset.id=makeId("preset");preset.label=name.trim();
+    setCustomPresets(items=>[...items,preset]);setStatus("Custom preset saved");
+  };
+  const applyCustomPreset=(preset:PropertyTrack)=>{
+    if(!currentSequence)return;
+    const copy=clone(preset);copy.id=makeId("track");copy.target=selectorForMany(selectedIds);
+    copy.keyframes=copy.keyframes.map(k=>({...k,id:makeId("kf")}));
+    commit(d=>d.sequences.find(x=>x.id===currentSequence.id)?.tracks.push(copy),"Custom preset applied");
+    setActiveTrackId(copy.id);setShowPresets(false);setTab("Animate");
   };
   const removeTrack=()=>{
     if(!currentSequence||!currentTrack)return;
@@ -452,7 +494,7 @@ export default function App() {
           <div className="timeline-track-list" style={{width:`${Math.max(100,duration*120*zoom)}%`}}>
             {currentSequence?.tracks.map(track=><div key={track.id} className={"timeline-track "+(track.id===currentTrack?.id?"active":"")} onClick={()=>setActiveTrackId(track.id)}>
               <div className="track-label"><span>{track.property}</span><small>{track.target===selectorFor(selected)?"Selected layer":track.target}</small></div>
-              <div className="track-lane">{track.keyframes.map(key=><button key={key.id} className="keyframe-diamond" style={{left:`${(key.at+track.startTime)/duration*100}%`}} title={`${key.at}s: ${key.value}`} onClick={e=>{e.stopPropagation();setActiveTrackId(track.id);setPlayhead(key.at);}} onDoubleClick={e=>{e.stopPropagation();if(window.confirm("Delete this keyframe?"))commit(d=>{const t=d.sequences.find(x=>x.id===currentSequence?.id)?.tracks.find(x=>x.id===track.id);if(t)t.keyframes=t.keyframes.filter(k=>k.id!==key.id);});}}/>)}</div>
+              <div className="track-lane">{track.keyframes.map(key=><button key={key.id} className="keyframe-diamond" style={{left:`${(draggingKeyframe?.trackId===track.id&&draggingKeyframe.keyId===key.id?draggingKeyframe.at:key.at)+track.startTime)/duration*100}%`}} title={`${key.at}s: ${key.value}`} onPointerDown={e=>startKeyframeDrag(e,track,key)} onClick={e=>{e.stopPropagation();setActiveTrackId(track.id);setPlayhead(track.startTime+key.at);controllerRef.current?.seek(currentSequence?.id??"",track.startTime+key.at);}} onDoubleClick={e=>{e.stopPropagation();if(window.confirm("Delete this keyframe?"))commit(d=>{const t=d.sequences.find(x=>x.id===currentSequence?.id)?.tracks.find(x=>x.id===track.id);if(t)t.keyframes=t.keyframes.filter(k=>k.id!==key.id);});}}/>)}</div>
             </div>)}
             {currentSequence?.tracks.length===0&&<div className="empty-timeline">Add a property action to create your first animation track.</div>}
           </div>
@@ -465,8 +507,8 @@ export default function App() {
         <div className="inspector-header"><div><b>Animation Inspector</b><small>{selectedIds.length>1?`${selectedIds.length} elements selected`:selectedLayer?.name??"No element selected"}</small></div><button onClick={()=>setShowPresets(v=>!v)}>✦ Presets</button></div>
         <nav className="inspector-tabs">{(["Trigger","Animate","Timeline","Motion","Advanced"] as Tab[]).map(t=><button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{t}</button>)}</nav>
         <div className="inspector-content">
-          {tab==="Trigger"&&<TriggerInspector sequence={currentSequence} update={updateTrigger} addSequence={addSequence}/>}
-          {tab==="Animate"&&<AnimateInspector addTrack={addTrack} track={currentTrack} updateTrack={updateTrack} removeTrack={removeTrack} addKeyframe={addKeyframe} selected={selected}/>}
+          {tab==="Trigger"&&<TriggerInspector sequence={currentSequence} update={updateTrigger} updateName={name=>updateSequence({name})} addSequence={addSequence} duplicateSequence={duplicateSequence}/>}
+          {tab==="Animate"&&<AnimateInspector addTrack={addTrack} track={currentTrack} updateTrack={updateTrack} removeTrack={removeTrack} addKeyframe={addKeyframe} savePreset={saveCurrentPreset} selected={selected}/>}
           {tab==="Timeline"&&<TimelineInspector sequence={currentSequence} track={currentTrack} updateKeyframe={updateKeyframe} playhead={playhead}/>}
           {tab==="Motion"&&<MotionInspector sequence={currentSequence} update={updateMotion}/>}
           {tab==="Advanced"&&<AdvancedInspector sequence={currentSequence} updateTrigger={updateTrigger} breakpoint={breakpoint} track={currentTrack} commit={commit} readCss={readCss} writeCss={writeCss}/>}
@@ -474,7 +516,7 @@ export default function App() {
         <div className="inspector-footer"><span className={previewMode?"green-dot":"amber-dot"}/>{status}</div>
       </aside>
     </main>
-    {showPresets&&<div className="modal-backdrop" onClick={()=>setShowPresets(false)}><div className="preset-modal" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><b>Animation presets</b><small>Apply editable property tracks to the selected layer.</small></div><button onClick={()=>setShowPresets(false)}>×</button></div><div className="preset-grid">{PRESETS.map(p=><button key={p.group+p.name} onClick={()=>applyPreset(p)}><span>{p.group.toUpperCase()}</span><b>{p.name}</b><small>{PROPERTY_META[p.property].label}</small></button>)}</div></div></div>}
+    {showPresets&&<div className="modal-backdrop" onClick={()=>setShowPresets(false)}><div className="preset-modal" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><b>Animation presets</b><small>Apply editable property tracks to the selected layer.</small></div><button onClick={()=>setShowPresets(false)}>×</button></div><div className="preset-grid">{customPresets.map(p=><div className="custom-preset" key={p.id}><button onClick={()=>applyCustomPreset(p)}><span>CUSTOM</span><b>{p.label}</b><small>{PROPERTY_META[p.property].label}</small></button><button title="Delete custom preset" onClick={()=>setCustomPresets(items=>items.filter(x=>x.id!==p.id))}>×</button></div>)}{PRESETS.map(p=><button key={p.group+p.name} onClick={()=>applyPreset(p)}><span>{p.group.toUpperCase()}</span><b>{p.name}</b><small>{PROPERTY_META[p.property].label}</small></button>)}</div></div></div>}
     {htmlInputOpen&&<div className="modal-backdrop"><div className="html-modal"><div className="modal-head"><div><b>Website source</b><small>Edit the HTML loaded in the preview.</small></div><button onClick={()=>setHtmlInputOpen(false)}>×</button></div><textarea value={htmlDraft} onChange={e=>setHtmlDraft(e.target.value)} spellCheck={false}/><div className="modal-actions"><button onClick={()=>setHtmlInputOpen(false)}>Cancel</button><button className="primary-action" onClick={()=>{commit(d=>{d.html=prepareHtml(htmlDraft);},"Website source updated");setHtmlInputOpen(false);}}>Apply HTML</button></div></div></div>}
     <footer className="statusbar"><span><i/> {previewMode?"PREVIEW ENGINE ACTIVE":"EDITOR READY"}</span><span>{warnings.length?warnings.length+" warnings": "NO RUNTIME WARNINGS"}</span><span>GSAP 3 · SCROLLTRIGGER · VISUAL BUILDER</span></footer>
   </div>;
@@ -487,17 +529,17 @@ function Section({title,children,defaultOpen=true}:{title:string;children:React.
  const [open,setOpen]=useState(defaultOpen);
  return <section className="inspector-section"><button className="section-heading" onClick={()=>setOpen(v=>!v)}><span>{title}</span><b>{open?"−":"＋"}</b></button>{open&&<div className="section-body">{children}</div>}</section>;
 }
-function TriggerInspector({sequence,update,addSequence}:{sequence?:AnimationSequence;update:(v:Partial<AnimationSequence["trigger"]>)=>void;addSequence:(t?:TriggerType)=>void}){
+function TriggerInspector({sequence,update,updateName,addSequence,duplicateSequence}:{sequence?:AnimationSequence;update:(v:Partial<AnimationSequence["trigger"]>)=>void;updateName:(name:string)=>void;addSequence:(t?:TriggerType)=>void;duplicateSequence:()=>void}){
  if(!sequence)return <div className="empty-inspector"><b>No sequence</b><p>Create an animation to configure its trigger.</p><button className="primary-action" onClick={()=>addSequence()}>＋ New animation</button></div>;
- return <><Section title="Trigger type"><select className="wide-select" value={sequence.trigger.type} onChange={e=>update({type:e.target.value as TriggerType})}>{TRIGGER_GROUPS.map(g=><optgroup key={g.label} label={g.label}>{g.options.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</optgroup>)}</select><small className="helper">{TRIGGER_GROUPS.flatMap(g=>g.options).find(o=>o.id===sequence.trigger.type)?.description}</small></Section>
+ return <><Section title="Sequence"><Field label="Animation name" value={sequence.name} onChange={v=>updateName(String(v))}/><button className="wide-outline" onClick={duplicateSequence}>⧉ Duplicate sequence</button></Section><Section title="Trigger type"><select className="wide-select" value={sequence.trigger.type} onChange={e=>update({type:e.target.value as TriggerType})}>{TRIGGER_GROUPS.map(g=><optgroup key={g.label} label={g.label}>{g.options.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</optgroup>)}</select><small className="helper">{TRIGGER_GROUPS.flatMap(g=>g.options).find(o=>o.id===sequence.trigger.type)?.description}</small></Section>
  <Section title="Trigger target"><Field label="CSS selector" value={sequence.trigger.target||"[data-avab-id]"} onChange={v=>update({target:String(v)})}/><Field label="Scroller selector" value={sequence.trigger.scroller} onChange={v=>update({scroller:String(v)})}/><Field label="Custom event name" value={sequence.trigger.eventName} onChange={v=>update({eventName:String(v)})}/><Field label="Class to observe" value={sequence.trigger.className} onChange={v=>update({className:String(v)})}/></Section>
  <Section title="Scroll boundaries"><Field label="Start" value={sequence.trigger.start} onChange={v=>update({start:String(v)})}/><Field label="End" value={sequence.trigger.end} onChange={v=>update({end:String(v)})}/><div className="boundary-visual"><div className="viewport-mini"><i className="viewport-line start"/><i className="viewport-line end"/><span>VIEWPORT</span></div><div><b>{sequence.trigger.start}</b><small>START POSITION</small><b>{sequence.trigger.end}</b><small>END POSITION</small></div></div><Field label="Scrub progress" value={sequence.trigger.scrub} type="checkbox" onChange={v=>update({scrub:Boolean(v)})}/><Field label="Scrub smoothing" value={sequence.trigger.smoothing} unit="s" type="number" step={.1} onChange={v=>update({smoothing:Number(v)})}/><Field label="Horizontal scroll" value={sequence.trigger.horizontal} type="checkbox" onChange={v=>update({horizontal:Boolean(v)})}/></Section>
  <Section title="Scroll actions"><Field label="Pin element" value={sequence.trigger.pin} type="checkbox" onChange={v=>update({pin:Boolean(v)})}/><Field label="Pin target" value={sequence.trigger.pinTarget} onChange={v=>update({pinTarget:String(v)})}/><Field label="Pin spacing" value={sequence.trigger.pinSpacing} type="checkbox" onChange={v=>update({pinSpacing:Boolean(v)})}/><Field label="Toggle actions" value={sequence.trigger.toggleActions} onChange={v=>update({toggleActions:String(v)})}/><Field label="Once only" value={sequence.trigger.once} type="checkbox" onChange={v=>update({once:Boolean(v)})}/><Field label="Reverse on scroll up" value={sequence.trigger.reverse} type="checkbox" onChange={v=>update({reverse:Boolean(v)})}/><Field label="Snap points" value={sequence.trigger.snap} type="number" onChange={v=>update({snap:Number(v)})}/><Field label="Debug markers" value={sequence.trigger.markers} type="checkbox" onChange={v=>update({markers:Boolean(v)})}/></Section>
  <Section title="Event settings"><Field label="Delay" value={sequence.trigger.delay} unit="ms" type="number" onChange={v=>update({delay:Number(v)})}/><Field label="Visibility threshold" value={sequence.trigger.threshold} unit="px" type="number" onChange={v=>update({threshold:Number(v)})}/><Field label="Depends on sequence ID" value={sequence.trigger.dependsOn} onChange={v=>update({dependsOn:String(v)})}/></Section></>;
 }
-function AnimateInspector({addTrack,track,updateTrack,removeTrack,addKeyframe,selected}:{addTrack:(p:AnimProperty)=>void;track?:PropertyTrack;updateTrack:(v:Partial<PropertyTrack>)=>void;removeTrack:()=>void;addKeyframe:()=>void;selected:string}){
+function AnimateInspector({addTrack,track,updateTrack,removeTrack,addKeyframe,savePreset,selected}:{addTrack:(p:AnimProperty)=>void;track?:PropertyTrack;updateTrack:(v:Partial<PropertyTrack>)=>void;removeTrack:()=>void;addKeyframe:()=>void;savePreset:()=>void;selected:string}){
  return <><Section title="Add property action">{PROPERTY_GROUPS.map(g=><div className="property-group" key={g.label}><b>{g.label}</b><div className="property-buttons">{g.properties.map(p=><button key={p} onClick={()=>addTrack(p)}>{PROPERTY_META[p].label}</button>)}</div></div>)}</Section>
- {track?<Section title={`Selected action · ${track.label}`}><Field label="Action name" value={track.label} onChange={v=>updateTrack({label:String(v)})}/><Field label="Target selector" value={track.target} onChange={v=>updateTrack({target:String(v)})}/><Field label="Track start time" value={track.startTime} unit="s" type="number" step={.05} onChange={v=>updateTrack({startTime:Math.max(0,Number(v))})}/><Field label="Property" value={track.property} type="select" options={PROPERTY_GROUPS.flatMap(g=>g.properties)} onChange={v=>updateTrack({property:v as AnimProperty})}/><Field label="Enabled" value={track.enabled} type="checkbox" onChange={v=>updateTrack({enabled:Boolean(v)})}/><div className="keyframe-editor">{track.keyframes.map((k,i)=><div className="keyframe-row" key={k.id}><b>K{i+1}</b><Field label="Time" value={k.at} unit="s" type="number" step={.01} onChange={v=>updateTrack({keyframes:track.keyframes.map(x=>x.id===k.id?{...x,at:Number(v)}:x)})}/><Field label="Value" value={k.value} onChange={v=>updateTrack({keyframes:track.keyframes.map(x=>x.id===k.id?{...x,value:typeof v==="boolean"?String(v):v}:x)})}/><button onClick={()=>updateTrack({keyframes:track.keyframes.filter(x=>x.id!==k.id)})}>×</button></div>)}</div><button className="wide-outline" onClick={addKeyframe}>＋ Add keyframe at playhead</button><button className="wide-danger" onClick={removeTrack}>Remove action</button></Section>:<div className="empty-inspector"><p>Add a property action, then select its track to edit keyframes and targets.</p></div>}</>;
+ {track?<Section title={`Selected action · ${track.label}`}><Field label="Action name" value={track.label} onChange={v=>updateTrack({label:String(v)})}/><Field label="Target selector" value={track.target} onChange={v=>updateTrack({target:String(v)})}/><Field label="Track start time" value={track.startTime} unit="s" type="number" step={.05} onChange={v=>updateTrack({startTime:Math.max(0,Number(v))})}/><Field label="Property" value={track.property} type="select" options={PROPERTY_GROUPS.flatMap(g=>g.properties)} onChange={v=>updateTrack({property:v as AnimProperty})}/><Field label="Enabled" value={track.enabled} type="checkbox" onChange={v=>updateTrack({enabled:Boolean(v)})}/><div className="keyframe-editor">{track.keyframes.map((k,i)=><div className="keyframe-row" key={k.id}><b>K{i+1}</b><Field label="Time" value={k.at} unit="s" type="number" step={.01} onChange={v=>updateTrack({keyframes:track.keyframes.map(x=>x.id===k.id?{...x,at:Number(v)}:x)})}/><Field label="Value" value={k.value} onChange={v=>updateTrack({keyframes:track.keyframes.map(x=>x.id===k.id?{...x,value:typeof v==="boolean"?String(v):v}:x)})}/><button onClick={()=>updateTrack({keyframes:track.keyframes.filter(x=>x.id!==k.id)})}>×</button></div>)}</div><button className="wide-outline" onClick={addKeyframe}>＋ Add keyframe at playhead</button><button className="wide-outline" onClick={savePreset}>✦ Save as reusable preset</button><button className="wide-danger" onClick={removeTrack}>Remove action</button></Section>:<div className="empty-inspector"><p>Add a property action, then select its track to edit keyframes and targets.</p></div>}</>;
 }
 function TimelineInspector({sequence,track,updateKeyframe,playhead}:{sequence?:AnimationSequence;track?:PropertyTrack;updateKeyframe:(trackId:string,keyId:string,patch:Partial<Keyframe>)=>void;playhead:number}){
  if(!sequence||!track)return <div className="empty-inspector"><p>Select an animation track to edit its keyframes.</p></div>;
