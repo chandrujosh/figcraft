@@ -152,9 +152,42 @@ export default function App() {
       const d=frame.contentDocument;
       if(!d) return;
       let dragState:{element:HTMLElement;pointerId:number;startX:number;startY:number;baseX:number;baseY:number}|null=null;
+      let resizeState:{element:HTMLElement;pointerId:number;handle:string;startX:number;startY:number;width:number;height:number;left:number;top:number;baseX:number;baseY:number}|null=null;
+      const updateSelectionOverlay=()=>{
+        const overlay=d.getElementById("avab-selection-overlay") as HTMLElement|null;
+        const id=selectedRef.current;
+        const element=id?d.querySelector(selectorFor(id)) as HTMLElement|null:null;
+        if(!overlay)return;
+        if(!element||previewModeRef.current){overlay.style.display="none";return;}
+        const rect=element.getBoundingClientRect();
+        overlay.style.display="block";overlay.style.left=rect.left+"px";overlay.style.top=rect.top+"px";
+        overlay.style.width=rect.width+"px";overlay.style.height=rect.height+"px";
+      };
+      (frame.contentWindow as (Window & {__avabUpdateOverlay?:()=>void})|null)?.setTimeout(()=>{
+        const overlay=d.createElement("div");overlay.id="avab-selection-overlay";
+        overlay.innerHTML=["nw","n","ne","e","se","s","sw","w"].map(handle=>'<i data-avab-resize="'+handle+'"></i>').join("");
+        d.body.appendChild(overlay);
+        (frame.contentWindow as (Window & {__avabUpdateOverlay?:()=>void})|null).__avabUpdateOverlay=updateSelectionOverlay;
+        updateSelectionOverlay();
+        d.addEventListener("scroll",updateSelectionOverlay,true);
+        frame.contentWindow?.addEventListener("resize",updateSelectionOverlay);
+      },0);
       d.addEventListener("pointerdown",e=>{
         if(previewModeRef.current) return;
         const pointer=e as PointerEvent;
+        const handle=pointer.target instanceof Element?pointer.target.closest("[data-avab-resize]"):null;
+        if(handle){
+          const id=selectedRef.current;
+          const element=id?d.querySelector(selectorFor(id)) as HTMLElement|null:null;
+          if(element&&pointer.button===0){
+            const rect=element.getBoundingClientRect(),computed=d.defaultView?.getComputedStyle(element);
+            const parts=(computed?.translate||"none").split(/\\s+/);
+            resizeState={element,pointerId:pointer.pointerId,handle:handle.getAttribute("data-avab-resize")||"se",startX:pointer.clientX,startY:pointer.clientY,width:rect.width,height:rect.height,left:rect.left,top:rect.top,baseX:parts[0]==="none"?0:parseFloat(parts[0])||0,baseY:parts[1]?parseFloat(parts[1])||0:0};
+            try{(handle as HTMLElement).setPointerCapture(pointer.pointerId);}catch{}
+            pointer.preventDefault();pointer.stopPropagation();
+          }
+          return;
+        }
         const target=pointer.target instanceof Element?pointer.target.closest("[data-avab-id]"):null;
         if(!target||target.closest("[data-avab-locked='true']")) return;
         const id=target.getAttribute("data-avab-id");
@@ -167,14 +200,28 @@ export default function App() {
         pointer.preventDefault();
       },true);
       d.addEventListener("pointermove",e=>{
-        const pointer=e as PointerEvent,state=dragState;
+        const pointer=e as PointerEvent;
+        if(resizeState&&pointer.pointerId===resizeState.pointerId){
+          const state=resizeState,dx=pointer.clientX-state.startX,dy=pointer.clientY-state.startY;
+          const west=state.handle.includes("w"),north=state.handle.includes("n");
+          state.element.style.width=Math.max(12,state.width+(west?-dx:state.handle.includes("e")?dx:0))+"px";
+          state.element.style.height=Math.max(12,state.height+(north?-dy:state.handle.includes("s")?dy:0))+"px";
+          if(west||north)state.element.style.translate=(state.baseX+(west?dx:0))+"px "+(state.baseY+(north?dy:0))+"px";
+          updateSelectionOverlay();pointer.preventDefault();return;
+        }
+        const state=dragState;
         if(!state||pointer.pointerId!==state.pointerId)return;
         pointer.preventDefault();
         const dx=pointer.clientX-state.startX,dy=pointer.clientY-state.startY;
         state.element.style.translate=(state.baseX+dx)+"px "+(state.baseY+dy)+"px";
+        updateSelectionOverlay();
       },true);
       d.addEventListener("pointerup",e=>{
         const pointer=e as PointerEvent;
+        if(resizeState&&pointer.pointerId===resizeState.pointerId){
+          const moved=Math.abs(pointer.clientX-resizeState.startX)+Math.abs(pointer.clientY-resizeState.startY)>2;
+          resizeState=null;if(moved)window.postMessage({type:"AVAB_DRAG_COMMIT"},"*");return;
+        }
         if(!dragState||pointer.pointerId!==dragState.pointerId)return;
         const moved=Math.abs(pointer.clientX-dragState.startX)+Math.abs(pointer.clientY-dragState.startY)>2;
         dragState=null;
@@ -196,6 +243,20 @@ export default function App() {
     frame.contentWindow?.setTimeout(inject, 0);
   }, []);
 
+  useEffect(()=>{
+    const onKey=(event:KeyboardEvent)=>{
+      const target=event.target as HTMLElement|null;
+      const editing=target&&(target.tagName==="INPUT"||target.tagName==="TEXTAREA"||target.isContentEditable);
+      if(editing)return;
+      const modifier=event.ctrlKey||event.metaKey;
+      if(modifier&&event.key.toLowerCase()==="d"){event.preventDefault();duplicateSelection();}
+      if(modifier&&event.key.toLowerCase()==="g"){event.preventDefault();if(selectedIds.length===1)groupLayer(selectedIds[0]);}
+      if(event.key==="Delete"||event.key==="Backspace"){if(selectedIds.length){event.preventDefault();deleteSelection();}}
+      if(event.key==="Escape"){setSelectedIds([]);setSelected("");}
+    };
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  });
   useEffect(()=>{ refreshPreview(); },[project.html,refreshPreview]);
 
   useEffect(()=>{
@@ -227,6 +288,7 @@ export default function App() {
     const style=doc.getElementById("avab-editor-style");
     if(style) style.textContent=`[data-avab-id]{cursor:${previewMode?"auto":"crosshair"}!important;outline:1px dashed transparent;outline-offset:2px}[data-avab-id]:hover{outline-color:${previewMode?"transparent":"rgba(151,203,255,.65)"}!important}[data-avab-selected="true"]{outline:2px solid #d7f75b!important}`;
     if(previewMode) doc.body.classList.add("avab-preview"); else doc.body.classList.remove("avab-preview");
+    (iframeRef.current?.contentWindow as (Window & {__avabUpdateOverlay?:()=>void})|null)?.__avabUpdateOverlay?.();
   },[selected,selectedIds,previewMode,project.html]);
 
   const stopEngine=useCallback(()=>{controllerRef.current?.destroy();controllerRef.current=null;setPlaying(false);},[]);
@@ -587,7 +649,10 @@ load(GSAP).then(function(){return load(SCROLL);}).then(function(){return fetch("
   const addDesignElement=(kind:"frame"|"rectangle"|"ellipse"|"text"|"heading"|"button"|"divider")=>{
     const doc=iframeRef.current?.contentDocument;
     if(!doc)return;
-    const parent=kind==="frame"?doc.body:(doc.querySelector(selectorFor(selected))??doc.body);
+    const selectedElement=doc.querySelector(selectorFor(selected));
+    const selectedTag=selectedElement?.tagName.toLowerCase()??"";
+    const canContain=["body","main","section","article","header","footer","nav","div","aside","ul","ol","li","form"].includes(selectedTag);
+    const parent=kind==="frame"?doc.body:(selectedElement&&(canContain||selectedTag==="div"&&selectedElement.getAttribute("data-avab-group")==="true")?selectedElement:selectedElement?.parentElement??doc.body);
     const el=doc.createElement(kind==="heading"?"h2":kind==="button"?"button":kind==="divider"?"hr":kind==="text"?"p":"div");
     const id=makeId("design");
     const names={frame:"Frame",rectangle:"Rectangle",ellipse:"Ellipse",text:"Text",heading:"Heading",button:"Button",divider:"Divider"};
@@ -629,7 +694,10 @@ load(GSAP).then(function(){return load(SCROLL);}).then(function(){return fetch("
     const id=makeId("image");
     img.src=data;img.alt=file.name;img.setAttribute("data-avab-id",id);img.setAttribute("data-avab-name",file.name);
     img.style.cssText="display:block;width:320px;max-width:100%;height:auto;object-fit:cover;border-radius:6px;position:relative;";
-    const parent=doc.querySelector(selectorFor(selected))??doc.body;
+    const selectedElement=doc.querySelector(selectorFor(selected));
+    const selectedTag=selectedElement?.tagName.toLowerCase()??"";
+    const canContain=["body","main","section","article","header","footer","nav","div","aside"].includes(selectedTag);
+    const parent=selectedElement&&(canContain||selectedElement.getAttribute("data-avab-group")==="true")?selectedElement:selectedElement?.parentElement??doc.body;
     parent.appendChild(img);
     const html=serializeFrame(iframeRef.current!);
     commit(d=>{d.html=html;},"Image added");
