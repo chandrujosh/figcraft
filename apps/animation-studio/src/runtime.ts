@@ -1,4 +1,4 @@
-import { gsap, type TweenVars } from "gsap";
+import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import type { AnimationSequence, AnimProperty, Breakpoint, PropertyTrack, StudioProject, TriggerType } from "./model";
 
@@ -37,7 +37,7 @@ function splitText(el:Element,mode:string):HTMLElement[]{
  }
  return result;
 }
-function styleFor(track:PropertyTrack,value:string|number):TweenVars{
+function styleFor(track:PropertyTrack,value:string|number):Record<string,string|number>{
  const prop=track.property;
  if(prop==="filter")return {filter:String(value)};
  if(["blur","brightness","saturation","grayscale","contrast"].includes(prop)){
@@ -49,7 +49,7 @@ function styleFor(track:PropertyTrack,value:string|number):TweenVars{
  }
  const mapped=propMap[prop];
  if(!mapped)return {};
- return {[mapped]:cssValue(prop,value)} as TweenVars;
+ return {[mapped]:cssValue(prop,value)};
 }
 function easeTracks(tl:gsap.core.Timeline,doc:Document,track:PropertyTrack,defaultTarget:string,offset:number,stagger:{each:number;from:string}|undefined,warnings:string[]){
  if(!track.enabled||!track.keyframes.length)return;
@@ -60,14 +60,14 @@ function easeTracks(tl:gsap.core.Timeline,doc:Document,track:PropertyTrack,defau
    const units=splitText(target,String(track.keyframes[0]?.value??"words"));
    const last=track.keyframes.at(-1);
    if(!last)continue;
-   tl.fromTo(units,{y:24,autoAlpha:0},{y:0,autoAlpha:1,duration:Math.max(.05,last.at),ease:last.ease||"power3.out",stagger:stagger??{each:.035},},offset);
+   tl.fromTo(units,{y:24,autoAlpha:0} as never,{y:0,autoAlpha:1,duration:Math.max(.05,last.at),ease:last.ease||"power3.out",stagger:stagger??{each:.035},} as never,offset);
   }
   return;
  }
  const keys=[...track.keyframes].sort((a,b)=>a.at-b.at);
  const first=keys[0];
  if(keys.length===1){
-  tl.to(els,{...styleFor(track,first.value),duration:.01},offset);
+  tl.to(els,{...styleFor(track,first.value),duration:.01} as never,offset);
   return;
  }
  for(let index=1;index<keys.length;index++){
@@ -75,8 +75,8 @@ function easeTracks(tl:gsap.core.Timeline,doc:Document,track:PropertyTrack,defau
   const duration=Math.max(.001,to.at-from.at);
   const fromVars=styleFor(track,from.value);
   const toVars={...styleFor(track,to.value),duration,ease:to.ease||"power2.out",...(stagger?{stagger}:{})};
-  if(track.property==="visibility")tl.fromTo(els,{autoAlpha:Number(fromVars.autoAlpha??fromVars.visibility??0)},{...toVars,autoAlpha:Number(to.value==="hidden"||to.value==="autoAlpha:0"?0:1)},offset+from.at);
-  else tl.fromTo(els,fromVars,toVars,offset+from.at);
+  if(track.property==="visibility")tl.fromTo(els,{autoAlpha:Number(fromVars.autoAlpha??fromVars.visibility??0)} as never,{...toVars,autoAlpha:Number(to.value==="hidden"||to.value==="autoAlpha:0"?0:1)} as never,offset+from.at);
+  else tl.fromTo(els,fromVars as never,toVars as never,offset+from.at);
  }
 }
 
