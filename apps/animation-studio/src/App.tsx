@@ -477,6 +477,7 @@ load(GSAP).then(function(){return load(SCROLL);}).then(function(){return fetch("
     if(!el?.parentElement)return;
     const copy=el.cloneNode(true) as HTMLElement;
     const newId=makeId("layer");copy.setAttribute("data-avab-id",newId);copy.setAttribute("data-avab-name",`${el.getAttribute("data-avab-name")||el.tagName} copy`);
+    copy.querySelectorAll("[data-avab-id]").forEach(child=>child.setAttribute("data-avab-id",makeId("layer")));
     el.parentElement.insertBefore(copy,el.nextSibling);
     const html=serializeFrame(iframeRef.current!);
     commit(d=>{d.html=html;},"Layer duplicated");setSelected(newId);refreshLayers();
